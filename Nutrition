@@ -1,0 +1,430 @@
+import React, { useState, useEffect, useRef } from "react";
+import { base44 } from "@/api/base44Client";
+import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
+import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import { Button } from "@/components/ui/button";
+import { Textarea } from "@/components/ui/textarea";
+import { Input } from "@/components/ui/input";
+import { Label } from "@/components/ui/label";
+import { Badge } from "@/components/ui/badge";
+import { Progress } from "@/components/ui/progress";
+import { 
+  Utensils, 
+  Plus, 
+  Sparkles,
+  Coffee,
+  Sun,
+  Sunset,
+  Moon as MoonIcon,
+  Flame,
+  TrendingUp,
+  ChevronDown,
+  ChevronUp,
+  Camera,
+  Calendar,
+  Target,
+  Award,
+  ShoppingCart,
+  BookOpen
+} from "lucide-react";
+import { format, subDays, startOfWeek, endOfWeek } from "date-fns";
+import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, Legend, PieChart, Pie, Cell } from "recharts";
+
+export default function Nutrition() {
+  const [user, setUser] = useState(null);
+  const [showForm, setShowForm] = useState(false);
+  const [selectedDate, setSelectedDate] = useState(format(new Date(), "yyyy-MM-dd"));
+  const [analyzing, setAnalyzing] = useState(false);
+  const [expandedMeal, setExpandedMeal] = useState(null);
+  const [showGroceryList, setShowGroceryList] = useState(false);
+  const [groceryItems, setGroceryItems] = useState([]);
+  const queryClient = useQueryClient();
+  const fileInputRef = useRef(null);
+
+  const [mealData, setMealData] = useState({
+    meal_type: "breakfast",
+    meal_description: "",
+    meal_date: selectedDate,
+    meal_time: format(new Date(), "HH:mm")
+  });
+
+  useEffect(() => {
+    const loadUser = async () => {
+      const userData = await base44.auth.me();
+      setUser(userData);
+    };
+    loadUser();
+  }, []);
+
+  const { data: todayMeals = [] } = useQuery({
+    queryKey: ["meals", user?.email, selectedDate],
+    queryFn: async () => {
+      return await base44.entities.MealLog.filter({ 
+        user_email: user?.email, 
+        meal_date: selectedDate 
+      }, "-meal_time");
+    },
+    enabled: !!user?.email,
+  });
+
+  const { data: weekMeals = [] } = useQuery({
+    queryKey: ["weekMeals", user?.email],
+    queryFn: async () => {
+      const start = format(startOfWeek(new Date()), "yyyy-MM-dd");
+      const end = format(endOfWeek(new Date()), "yyyy-MM-dd");
+      const allMeals = await base44.entities.MealLog.filter({ user_email: user?.email }, "-meal_date");
+      return allMeals.filter(m => m.meal_date >= start && m.meal_date <= end);
+    },
+    enabled: !!user?.email,
+  });
+
+  const { data: healthProfile } = useQuery({
+    queryKey: ["healthProfile", user?.email],
+    queryFn: async () => {
+      const profiles = await base44.entities.HealthProfile.filter({ user_email: user?.email });
+      return profiles[0];
+    },
+    enabled: !!user?.email,
+  });
+
+  const createMealMutation = useMutation({
+    mutationFn: async (meal) => {
+      setAnalyzing(true);
+      try {
+        const analysis = await base44.integrations.Core.InvokeLLM({
+          prompt: `Analyze this meal for a user with these details:
+- Dietary preferences: ${healthProfile?.dietary_preferences?.join(", ") || "None"}
+- Dietary restrictions: ${healthProfile?.dietary_restrictions?.join(", ") || "None"}
+- Target weight: ${healthProfile?.target_weight_lbs} lbs
+- Current BMI: ${healthProfile?.bmi?.toFixed(1)}
+
+Meal: "${meal.meal_description}"
+          
+Provide detailed nutritional estimates and specific suggestions for improvement.
+          
+Return ONLY valid JSON with this structure:
+{
+  "calories": number,
+  "protein_g": number,
+  "carbs_g": number,
+  "fat_g": number,
+  "fiber_g": number,
+  "sugar_g": number,
+  "healthiness_score": number (0-10),
+  "ai_suggestions": "string with 2-3 specific, actionable suggestions"
+}`,
+          response_json_schema: {
+            type: "object",
+            properties: {
+              calories: { type: "number" },
+              protein_g: { type: "number" },
+              carbs_g: { type: "number" },
+              fat_g: { type: "number" },
+              fiber_g: { type: "number" },
+              sugar_g: { type: "number" },
+              healthiness_score: { type: "number" },
+              ai_suggestions: { type: "string" }
+            }
+          }
+        });
+
+        return await base44.entities.MealLog.create({
+          ...meal,
+          user_email: user.email,
+          ...analysis
+        });
+      } finally {
+        setAnalyzing(false);
+      }
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["meals"] });
+      queryClient.invalidateQueries({ queryKey: ["weekMeals"] });
+      setShowForm(false);
+      setMealData({
+        meal_type: "breakfast",
+        meal_description: "",
+        meal_date: selectedDate,
+        meal_time: format(new Date(), "HH:mm")
+      });
+    },
+  });
+
+  const handlePhotoUpload = async (e) => {
+    const file = e.target.files[0];
+    if (!file) return;
+
+    setAnalyzing(true);
+    try {
+      const { file_url } = await base44.integrations.Core.UploadFile({ file });
+      
+      const analysis = await base44.integrations.Core.InvokeLLM({
+        prompt: `Analyze this meal photo in detail. Identify all food items and provide:
+1. Complete meal description
+2. Nutritional breakdown (calories, protein, carbs, fat, fiber, sugar)
+3. Health rating (0-10)
+4. Specific improvement suggestions
+
+User context:
+- Dietary preferences: ${healthProfile?.dietary_preferences?.join(", ") || "None"}
+- Dietary restrictions: ${healthProfile?.dietary_restrictions?.join(", ") || "None"}
+
+Return complete JSON with all nutritional data.`,
+        file_urls: [file_url],
+        response_json_schema: {
+          type: "object",
+          properties: {
+            meal_description: { type: "string" },
+            calories: { type: "number" },
+            protein_g: { type: "number" },
+            carbs_g: { type: "number" },
+            fat_g: { type: "number" },
+            fiber_g: { type: "number" },
+            sugar_g: { type: "number" },
+            healthiness_score: { type: "number" },
+            ai_suggestions: { type: "string" }
+          }
+        }
+      });
+
+      await base44.entities.MealLog.create({
+        user_email: user.email,
+        meal_type: mealData.meal_type,
+        meal_date: selectedDate,
+        meal_time: format(new Date(), "HH:mm"),
+        photo_url: file_url,
+        ...analysis
+      });
+
+      queryClient.invalidateQueries({ queryKey: ["meals"] });
+      queryClient.invalidateQueries({ queryKey: ["weekMeals"] });
+    } catch (error) {
+      console.error("Error analyzing photo:", error);
+    }
+    setAnalyzing(false);
+  };
+
+  const generateGroceryList = async () => {
+    setShowGroceryList(true);
+    try {
+      const result = await base44.integrations.Core.InvokeLLM({
+        prompt: `Based on this user's profile, create a healthy grocery shopping list:
+- Target: ${healthProfile?.target_weight_lbs} lbs
+- Dietary preferences: ${healthProfile?.dietary_preferences?.join(", ") || "None"}
+- Dietary restrictions: ${healthProfile?.dietary_restrictions?.join(", ") || "None"}
+- Current BMI: ${healthProfile?.bmi?.toFixed(1)}
+
+Generate a practical, affordable grocery list organized by category (Proteins, Vegetables, Fruits, Grains, Dairy, Pantry).
+Focus on nutrient-dense, whole foods that support their health goals.
+
+Return JSON array of items.`,
+        response_json_schema: {
+          type: "object",
+          properties: {
+            items: {
+              type: "array",
+              items: {
+                type: "object",
+                properties: {
+                  category: { type: "string" },
+                  name: { type: "string" },
+                  quantity: { type: "string" }
+                }
+              }
+            }
+          }
+        }
+      });
+      setGroceryItems(result.items || []);
+    } catch (error) {
+      console.error("Error generating grocery list:", error);
+    }
+  };
+
+  const todayCalories = todayMeals.reduce((sum, meal) => sum + (meal.calories || 0), 0);
+  const todayProtein = todayMeals.reduce((sum, meal) => sum + (meal.protein_g || 0), 0);
+  const todayCarbs = todayMeals.reduce((sum, meal) => sum + (meal.carbs_g || 0), 0);
+  const todayFat = todayMeals.reduce((sum, meal) => sum + (meal.fat_g || 0), 0);
+  const todayFiber = todayMeals.reduce((sum, meal) => sum + (meal.fiber_g || 0), 0);
+  
+  const dailyCalorieGoal = 2000;
+  const dailyProteinGoal = 150;
+  const dailyFiberGoal = 30;
+
+  // Weekly nutrition data for charts
+  const weeklyData = Array.from({ length: 7 }, (_, i) => {
+    const date = format(subDays(new Date(), 6 - i), "yyyy-MM-dd");
+    const dayMeals = weekMeals.filter(m => m.meal_date === date);
+    return {
+      day: format(new Date(date), "EEE"),
+      calories: dayMeals.reduce((sum, m) => sum + (m.calories || 0), 0),
+      protein: dayMeals.reduce((sum, m) => sum + (m.protein_g || 0), 0),
+      carbs: dayMeals.reduce((sum, m) => sum + (m.carbs_g || 0), 0),
+      fat: dayMeals.reduce((sum, m) => sum + (m.fat_g || 0), 0)
+    };
+  });
+
+  // Macro distribution
+  const macroData = [
+    { name: "Protein", value: todayProtein, color: "#ef4444" },
+    { name: "Carbs", value: todayCarbs, color: "#f59e0b" },
+    { name: "Fat", value: todayFat, color: "#8b5cf6" }
+  ];
+
+  const getMealIcon = (mealType) => {
+    switch(mealType) {
+      case "breakfast": return <Coffee className="w-5 h-5 text-orange-600" />;
+      case "lunch": return <Sun className="w-5 h-5 text-yellow-600" />;
+      case "dinner": return <Sunset className="w-5 h-5 text-purple-600" />;
+      case "snack": return <MoonIcon className="w-5 h-5 text-blue-600" />;
+      default: return <Utensils className="w-5 h-5" />;
+    }
+  };
+
+  const getHealthinessColor = (score) => {
+    if (score >= 8) return "bg-green-100 text-green-800 border-green-200";
+    if (score >= 6) return "bg-yellow-100 text-yellow-800 border-yellow-200";
+    return "bg-orange-100 text-orange-800 border-orange-200";
+  };
+
+  const avgHealthiness = todayMeals.length > 0
+    ? (todayMeals.reduce((sum, m) => sum + (m.healthiness_score || 0), 0) / todayMeals.length).toFixed(1)
+    : 0;
+
+  return (
+    <div className="p-4 md:p-8 space-y-6">
+      <div className="flex flex-col md:flex-row justify-between items-start md:items-center gap-4">
+        <div>
+          <h1 className="text-3xl md:text-4xl font-bold text-slate-900">Nutrition Tracker</h1>
+          <p className="text-slate-500 mt-1">Track meals, analyze nutrition, reach your goals</p>
+        </div>
+        <div className="flex gap-3 flex-wrap">
+          <Input
+            type="date"
+            value={selectedDate}
+            onChange={(e) => setSelectedDate(e.target.value)}
+            className="w-auto"
+          />
+          <input
+            type="file"
+            ref={fileInputRef}
+            onChange={handlePhotoUpload}
+            accept="image/*"
+            capture="environment"
+            className="hidden"
+          />
+          <Button
+            onClick={() => fileInputRef.current?.click()}
+            variant="outline"
+            className="border-2 border-purple-300 hover:bg-purple-50"
+            disabled={analyzing}
+          >
+            <Camera className="w-5 h-5 mr-2" />
+            Scan Meal
+          </Button>
+          <Button
+            onClick={() => setShowForm(!showForm)}
+            className="bg-gradient-to-r from-orange-500 to-orange-600 hover:from-orange-600 hover:to-orange-700"
+          >
+            <Plus className="w-5 h-5 mr-2" />
+            Log Meal
+          </Button>
+        </div>
+      </div>
+
+      {/* Enhanced Stats */}
+      <div className="grid grid-cols-1 md:grid-cols-5 gap-4">
+        <Card className="border-none shadow-lg bg-gradient-to-br from-orange-50 to-orange-100">
+          <CardContent className="p-6">
+            <div className="flex items-center justify-between mb-3">
+              <Flame className="w-8 h-8 text-orange-600" />
+              <span className="text-xs font-semibold text-orange-900">CALORIES</span>
+            </div>
+            <div className="space-y-2">
+              <div className="flex items-baseline gap-2">
+                <span className="text-3xl font-bold text-slate-900">{todayCalories}</span>
+                <span className="text-sm text-slate-600">/ {dailyCalorieGoal}</span>
+              </div>
+              <Progress value={(todayCalories / dailyCalorieGoal) * 100} className="h-2" />
+            </div>
+          </CardContent>
+        </Card>
+
+        <Card className="border-none shadow-lg bg-gradient-to-br from-red-50 to-red-100">
+          <CardContent className="p-6">
+            <div className="flex items-center justify-between mb-3">
+              <TrendingUp className="w-8 h-8 text-red-600" />
+              <span className="text-xs font-semibold text-red-900">PROTEIN</span>
+            </div>
+            <div className="space-y-2">
+              <div className="flex items-baseline gap-2">
+                <span className="text-3xl font-bold text-slate-900">{todayProtein.toFixed(0)}</span>
+                <span className="text-sm text-slate-600">/ {dailyProteinGoal}g</span>
+              </div>
+              <Progress value={(todayProtein / dailyProteinGoal) * 100} className="h-2" />
+            </div>
+          </CardContent>
+        </Card>
+
+        <Card className="border-none shadow-lg bg-gradient-to-br from-yellow-50 to-yellow-100">
+          <CardContent className="p-6">
+            <span className="text-xs font-semibold text-yellow-900 block mb-3">CARBS</span>
+            <div className="text-3xl font-bold text-slate-900">{todayCarbs.toFixed(0)}g</div>
+          </CardContent>
+        </Card>
+
+        <Card className="border-none shadow-lg bg-gradient-to-br from-purple-50 to-purple-100">
+          <CardContent className="p-6">
+            <span className="text-xs font-semibold text-purple-900 block mb-3">FAT</span>
+            <div className="text-3xl font-bold text-slate-900">{todayFat.toFixed(0)}g</div>
+          </CardContent>
+        </Card>
+
+        <Card className="border-none shadow-lg bg-gradient-to-br from-green-50 to-green-100">
+          <CardContent className="p-6">
+            <div className="flex items-center justify-between mb-3">
+              <Award className="w-8 h-8 text-green-600" />
+              <span className="text-xs font-semibold text-green-900">QUALITY</span>
+            </div>
+            <div className="text-3xl font-bold text-slate-900">{avgHealthiness}/10</div>
+          </CardContent>
+        </Card>
+      </div>
+
+      {/* Charts */}
+      <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+        <Card className="border-none shadow-lg">
+          <CardHeader className="border-b border-slate-100">
+            <CardTitle>Weekly Calorie Intake</CardTitle>
+          </CardHeader>
+          <CardContent className="p-6">
+            <ResponsiveContainer width="100%" height={250}>
+              <BarChart data={weeklyData}>
+                <CartesianGrid strokeDasharray="3 3" />
+                <XAxis dataKey="day" />
+                <YAxis />
+                <Tooltip />
+                <Bar dataKey="calories" fill="#f97316" name="Calories" />
+              </BarChart>
+            </ResponsiveContainer>
+          </CardContent>
+        </Card>
+
+        <Card className="border-none shadow-lg">
+          <CardHeader className="border-b border-slate-100">
+            <CardTitle>Today's Macro Distribution</CardTitle>
+          </CardHeader>
+          <CardContent className="p-6 flex items-center justify-center">
+            {todayMeals.length > 0 ? (
+              <ResponsiveContainer width="100%" height={250}>
+                <PieChart>
+                  <Pie
+                    data={macroData}
+                    cx="50%"
+                    cy="50%"
+                    labelLine={false}
+                    label={({ name, value }) => `${name}: ${value.toFixed(0)}g`}
+                    outerRadius={80}
+                    fill="#8884d8"
+                    dataKey="value"
+ 
