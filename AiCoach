@@ -1,0 +1,390 @@
+import React, { useState, useEffect, useRef } from "react";
+import { base44 } from "@/api/base44Client";
+import { useQuery } from "@tanstack/react-query";
+import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import { Button } from "@/components/ui/button";
+import { Input } from "@/components/ui/input";
+import { Badge } from "@/components/ui/badge";
+import { Progress } from "@/components/ui/progress";
+import { 
+  Bot, 
+  Send,
+  Sparkles,
+  Heart,
+  TrendingUp,
+  Lightbulb,
+  Target,
+  Clock,
+  MessageCircle,
+  Mic,
+  Image as ImageIcon,
+  FileText,
+  Activity,
+  Utensils,
+  Moon,
+  Brain,
+  Zap,
+  ThumbsUp,
+  ThumbsDown
+} from "lucide-react";
+import { format } from "date-fns";
+
+export default function AICoach() {
+  const [user, setUser] = useState(null);
+  const [messages, setMessages] = useState([]);
+  const [input, setInput] = useState("");
+  const [loading, setLoading] = useState(false);
+  const [conversationContext, setConversationContext] = useState([]);
+  const [voiceInput, setVoiceInput] = useState(false);
+  const messagesEndRef = useRef(null);
+  const fileInputRef = useRef(null);
+
+  useEffect(() => {
+    const loadUser = async () => {
+      const userData = await base44.auth.me();
+      setUser(userData);
+    };
+    loadUser();
+  }, []);
+
+  const { data: healthProfile } = useQuery({
+    queryKey: ["healthProfile", user?.email],
+    queryFn: async () => {
+      const profiles = await base44.entities.HealthProfile.filter({ user_email: user?.email });
+      return profiles[0];
+    },
+    enabled: !!user?.email,
+  });
+
+  const { data: todayMeals = [] } = useQuery({
+    queryKey: ["todayMeals", user?.email],
+    queryFn: async () => {
+      const today = format(new Date(), "yyyy-MM-dd");
+      return await base44.entities.MealLog.filter({ user_email: user?.email, meal_date: today });
+    },
+    enabled: !!user?.email,
+  });
+
+  const { data: todayActivity = [] } = useQuery({
+    queryKey: ["todayActivity", user?.email],
+    queryFn: async () => {
+      const today = format(new Date(), "yyyy-MM-dd");
+      return await base44.entities.ActivityLog.filter({ user_email: user?.email, activity_date: today });
+    },
+    enabled: !!user?.email,
+  });
+
+  const { data: recentSleep = [] } = useQuery({
+    queryKey: ["recentSleep", user?.email],
+    queryFn: async () => {
+      return await base44.entities.SleepLog.filter({ user_email: user?.email }, "-sleep_date", 7);
+    },
+    enabled: !!user?.email,
+  });
+
+  const { data: activeGoals = [] } = useQuery({
+    queryKey: ["activeGoals", user?.email],
+    queryFn: async () => {
+      return await base44.entities.Goal.filter({ user_email: user?.email, status: "active" });
+    },
+    enabled: !!user?.email,
+  });
+
+  const { data: recentWeight = [] } = useQuery({
+    queryKey: ["recentWeight", user?.email],
+    queryFn: async () => {
+      return await base44.entities.WeightEntry.filter({ user_email: user?.email }, "-entry_date", 7);
+    },
+    enabled: !!user?.email,
+  });
+
+  useEffect(() => {
+    if (user && healthProfile && messages.length === 0) {
+      const todayCalories = todayMeals.reduce((sum, m) => sum + (m.calories || 0), 0);
+      const todayMinutes = todayActivity.reduce((sum, a) => sum + (a.duration_minutes || 0), 0);
+      const avgSleep = recentSleep.length > 0 
+        ? (recentSleep.reduce((sum, s) => sum + s.total_hours, 0) / recentSleep.length).toFixed(1)
+        : 0;
+
+      const welcomeMessage = {
+        role: "assistant",
+        content: `Hey ${user.full_name?.split(" ")[0] || "there"}! 👋 I'm your AI Health Coach, and I'm excited to help you on your health journey!\n\n📊 **Your Health Snapshot:**\n• Health Score: ${healthProfile.health_score}/100 ${healthProfile.health_score >= 80 ? "🌟" : healthProfile.health_score >= 60 ? "💪" : "📈"}\n• Risk Level: ${healthProfile.risk_level?.replace("_", " ").toUpperCase()}\n• BMI: ${healthProfile.bmi?.toFixed(1)}\n\n📅 **Today's Progress:**\n• Calories: ${todayCalories} consumed\n• Exercise: ${todayMinutes} minutes\n• Recent Sleep: ${avgSleep}h average\n\n💬 I can help you with:\n✓ Personalized meal plans & recipes\n✓ Custom workout routines\n✓ Sleep & stress management\n✓ Progress analysis & motivation\n✓ Nutrition advice & substitutions\n✓ Goal setting & tracking\n\nJust ask me anything! You can also upload meal photos for instant analysis. 📸`,
+        timestamp: new Date(),
+        type: "welcome"
+      };
+      setMessages([welcomeMessage]);
+    }
+  }, [user, healthProfile, todayMeals, todayActivity, recentSleep]);
+
+  useEffect(() => {
+    messagesEndRef.current?.scrollIntoView({ behavior: "smooth" });
+  }, [messages]);
+
+  const quickActions = [
+    {
+      icon: <Lightbulb className="w-4 h-4" />,
+      label: "Meal Plan",
+      prompt: "Create a personalized meal plan for today based on my profile and goals",
+      color: "from-orange-500 to-orange-600"
+    },
+    {
+      icon: <Activity className="w-4 h-4" />,
+      label: "Workout",
+      prompt: "Design a 30-minute workout routine that matches my fitness level",
+      color: "from-blue-500 to-blue-600"
+    },
+    {
+      icon: <Target className="w-4 h-4" />,
+      label: "Progress",
+      prompt: "Analyze my progress and tell me how I'm doing with my goals",
+      color: "from-green-500 to-green-600"
+    },
+    {
+      icon: <Heart className="w-4 h-4" />,
+      label: "Motivation",
+      prompt: "Give me personalized motivation based on my recent activity",
+      color: "from-pink-500 to-pink-600"
+    },
+    {
+      icon: <Utensils className="w-4 h-4" />,
+      label: "Healthy Swaps",
+      prompt: "Suggest healthy food substitutions for my common cravings",
+      color: "from-purple-500 to-purple-600"
+    },
+    {
+      icon: <Moon className="w-4 h-4" />,
+      label: "Sleep Tips",
+      prompt: "Give me personalized tips to improve my sleep quality",
+      color: "from-indigo-500 to-indigo-600"
+    }
+  ];
+
+  const analyzeImage = async (file) => {
+    setLoading(true);
+    try {
+      const { file_url } = await base44.integrations.Core.UploadFile({ file });
+      
+      const userMessage = {
+        role: "user",
+        content: "📸 [Uploaded meal photo for analysis]",
+        timestamp: new Date(),
+        imageUrl: file_url
+      };
+      setMessages(prev => [...prev, userMessage]);
+
+      const analysis = await base44.integrations.Core.InvokeLLM({
+        prompt: `Analyze this meal photo and provide:
+1. Detailed description of the meal
+2. Estimated nutritional content (calories, protein, carbs, fat)
+3. Health rating (0-10)
+4. Specific suggestions for healthier alternatives
+5. Whether this fits the user's goals (weight loss, health improvement)
+
+User Context:
+- Target weight: ${healthProfile.target_weight_lbs} lbs
+- Current BMI: ${healthProfile.bmi?.toFixed(1)}
+- Dietary preferences: ${healthProfile.dietary_preferences?.join(", ") || "None"}
+- Dietary restrictions: ${healthProfile.dietary_restrictions?.join(", ") || "None"}
+
+Be specific, constructive, and encouraging.`,
+        file_urls: [file_url]
+      });
+
+      const assistantMessage = {
+        role: "assistant",
+        content: analysis,
+        timestamp: new Date(),
+        type: "meal_analysis"
+      };
+      setMessages(prev => [...prev, assistantMessage]);
+    } catch (error) {
+      console.error("Error analyzing image:", error);
+    }
+    setLoading(false);
+  };
+
+  const handleFileUpload = (e) => {
+    const file = e.target.files[0];
+    if (file && file.type.startsWith('image/')) {
+      analyzeImage(file);
+    }
+  };
+
+  const provideFeedback = async (messageIndex, isPositive) => {
+    const updatedMessages = [...messages];
+    updatedMessages[messageIndex].feedback = isPositive ? "positive" : "negative";
+    setMessages(updatedMessages);
+  };
+
+  const handleSend = async (messageText = input) => {
+    if (!messageText.trim()) return;
+
+    const userMessage = {
+      role: "user",
+      content: messageText,
+      timestamp: new Date()
+    };
+
+    setMessages(prev => [...prev, userMessage]);
+    setConversationContext(prev => [...prev, { role: "user", content: messageText }]);
+    setInput("");
+    setLoading(true);
+
+    try {
+      const todayCalories = todayMeals.reduce((sum, m) => sum + (m.calories || 0), 0);
+      const todayMinutes = todayActivity.reduce((sum, a) => sum + (a.duration_minutes || 0), 0);
+      const avgSleep = recentSleep.length > 0 
+        ? (recentSleep.reduce((sum, s) => sum + s.total_hours, 0) / recentSleep.length).toFixed(1)
+        : 0;
+      const weightTrend = recentWeight.length > 1 
+        ? (recentWeight[0].weight_lbs - recentWeight[recentWeight.length - 1].weight_lbs).toFixed(1)
+        : 0;
+
+      const conversationHistory = conversationContext.slice(-6).map(msg => 
+        `${msg.role === "user" ? "User" : "Coach"}: ${msg.content}`
+      ).join("\n");
+
+      const context = `You are an expert AI Health Coach with deep knowledge of nutrition, exercise science, behavioral psychology, and preventive medicine.
+
+CONVERSATION HISTORY:
+${conversationHistory}
+
+USER PROFILE:
+- Name: ${user.full_name || user.email}
+- Age: ${healthProfile.age}, Gender: ${healthProfile.gender}
+- Health Score: ${healthProfile.health_score}/100
+- BMI: ${healthProfile.bmi?.toFixed(1)} (Target: healthy range)
+- Current Weight: ${healthProfile.current_weight_lbs} lbs
+- Target Weight: ${healthProfile.target_weight_lbs} lbs
+- Weight Trend: ${weightTrend > 0 ? `Lost ${weightTrend} lbs` : weightTrend < 0 ? `Gained ${Math.abs(weightTrend)} lbs` : "No change"} this week
+- Risk Level: ${healthProfile.risk_level}
+- Activity Level: ${healthProfile.activity_level}
+- Sleep Average: ${avgSleep} hours
+- Stress Level: ${healthProfile.stress_level}
+- Dietary Preferences: ${healthProfile.dietary_preferences?.join(", ") || "None specified"}
+- Dietary Restrictions: ${healthProfile.dietary_restrictions?.join(", ") || "None specified"}
+- Family History: ${healthProfile.family_history_diabetes ? "Diabetes" : ""}${healthProfile.family_history_obesity ? ", Obesity" : ""}
+- Current Conditions: ${healthProfile.current_conditions?.join(", ") || "None"}
+
+TODAY'S ACTIVITY:
+- Calories consumed: ${todayCalories}
+- Exercise minutes: ${todayMinutes}
+- Meals logged: ${todayMeals.length}
+- Activities logged: ${todayActivity.length}
+
+ACTIVE GOALS:
+${activeGoals.map(g => `• ${g.title} (${g.progress_percentage?.toFixed(0) || 0}% complete)`).join("\n") || "No active goals"}
+
+COACHING GUIDELINES:
+1. Be warm, supportive, and empathetic - like a friend who's also an expert
+2. Use their name occasionally to personalize
+3. Provide specific, actionable advice (not generic)
+4. Reference their actual data and progress
+5. Celebrate small wins and progress
+6. Be honest about challenges but always encouraging
+7. Use emojis sparingly but effectively
+8. Keep responses concise (2-4 short paragraphs) unless they ask for details
+9. Ask follow-up questions to understand their needs better
+10. Connect advice to their specific goals and health profile
+
+CURRENT QUESTION: ${messageText}
+
+Respond as their personal AI health coach:`;
+
+      const shouldUseInternet = 
+        messageText.toLowerCase().includes("recipe") || 
+        messageText.toLowerCase().includes("research") ||
+        messageText.toLowerCase().includes("study") ||
+        messageText.toLowerCase().includes("latest") ||
+        messageText.toLowerCase().includes("best exercise") ||
+        messageText.toLowerCase().includes("how to");
+
+      const response = await base44.integrations.Core.InvokeLLM({
+        prompt: context,
+        add_context_from_internet: shouldUseInternet
+      });
+
+      const assistantMessage = {
+        role: "assistant",
+        content: response,
+        timestamp: new Date()
+      };
+
+      setMessages(prev => [...prev, assistantMessage]);
+      setConversationContext(prev => [...prev, { role: "assistant", content: response }]);
+    } catch (error) {
+      console.error("Error getting AI response:", error);
+      const errorMessage = {
+        role: "assistant",
+        content: "I apologize, but I'm having trouble processing that right now. Please try again in a moment! 🙏",
+        timestamp: new Date()
+      };
+      setMessages(prev => [...prev, errorMessage]);
+    }
+
+    setLoading(false);
+  };
+
+  const handleQuickAction = (prompt) => {
+    handleSend(prompt);
+  };
+
+  if (!healthProfile) {
+    return (
+      <div className="p-8 max-w-4xl mx-auto">
+        <Card className="border-none shadow-lg">
+          <CardContent className="p-12 text-center">
+            <Bot className="w-16 h-16 text-slate-300 mx-auto mb-4" />
+            <p className="text-slate-500">Complete your health profile to chat with your AI Coach</p>
+          </CardContent>
+        </Card>
+      </div>
+    );
+  }
+
+  return (
+    <div className="p-4 md:p-8 h-[calc(100vh-8rem)]">
+      <div className="max-w-6xl mx-auto h-full flex gap-6">
+        {/* Main Chat */}
+        <div className="flex-1 flex flex-col">
+          {/* Header */}
+          <div className="mb-4">
+            <div className="flex items-center justify-between">
+              <div className="flex items-center gap-3">
+                <div className="w-14 h-14 bg-gradient-to-br from-purple-500 via-pink-500 to-orange-500 rounded-2xl flex items-center justify-center shadow-xl animate-pulse">
+                  <Bot className="w-8 h-8 text-white" />
+                </div>
+                <div>
+                  <h1 className="text-2xl md:text-3xl font-bold text-slate-900">AI Health Coach</h1>
+                  <div className="flex items-center gap-2">
+                    <div className="w-2 h-2 bg-green-500 rounded-full animate-pulse" />
+                    <p className="text-sm text-slate-500">Online & Ready to Help</p>
+                  </div>
+                </div>
+              </div>
+              <Badge className="bg-gradient-to-r from-purple-500 to-pink-500 text-white border-0">
+                <Zap className="w-3 h-3 mr-1" />
+                AI Powered
+              </Badge>
+            </div>
+          </div>
+
+          {/* Quick Actions */}
+          {messages.length <= 1 && (
+            <div className="grid grid-cols-2 md:grid-cols-3 gap-3 mb-4">
+              {quickActions.map((action, index) => (
+                <button
+                  key={index}
+                  onClick={() => handleQuickAction(action.prompt)}
+                  className={`p-4 bg-gradient-to-r ${action.color} text-white rounded-xl hover:shadow-lg transition-all transform hover:scale-105`}
+                >
+                  <div className="flex items-center gap-2 mb-1">
+                    {action.icon}
+                    <span className="font-semibold text-sm">{action.label}</span>
+                  </div>
+                </button>
+              ))}
+            </div>
+          )}
+
+ 
