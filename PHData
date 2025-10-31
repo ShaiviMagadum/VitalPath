@@ -1,0 +1,612 @@
+{
+  "name": "HealthProfile",
+  "type": "object",
+  "properties": {
+    "user_email": {
+      "type": "string",
+      "description": "Email of the user this profile belongs to"
+    },
+    "age": {
+      "type": "number"
+    },
+    "gender": {
+      "type": "string",
+      "enum": [
+        "male",
+        "female",
+        "other",
+        "prefer_not_to_say"
+      ]
+    },
+    "height_inches": {
+      "type": "number"
+    },
+    "current_weight_lbs": {
+      "type": "number"
+    },
+    "target_weight_lbs": {
+      "type": "number"
+    },
+    "waist_circumference_inches": {
+      "type": "number"
+    },
+    "bmi": {
+      "type": "number"
+    },
+    "family_history_diabetes": {
+      "type": "boolean"
+    },
+    "family_history_obesity": {
+      "type": "boolean"
+    },
+    "current_conditions": {
+      "type": "array",
+      "items": {
+        "type": "string",
+        "enum": [
+          "prediabetes",
+          "type2_diabetes",
+          "hypertension",
+          "high_cholesterol",
+          "metabolic_syndrome",
+          "none"
+        ]
+      }
+    },
+    "activity_level": {
+      "type": "string",
+      "enum": [
+        "sedentary",
+        "lightly_active",
+        "moderately_active",
+        "very_active",
+        "extremely_active"
+      ]
+    },
+    "sleep_hours_avg": {
+      "type": "number"
+    },
+    "stress_level": {
+      "type": "string",
+      "enum": [
+        "low",
+        "moderate",
+        "high",
+        "very_high"
+      ]
+    },
+    "dietary_preferences": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      }
+    },
+    "dietary_restrictions": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      }
+    },
+    "health_score": {
+      "type": "number",
+      "description": "Calculated health score from 0-100"
+    },
+    "risk_level": {
+      "type": "string",
+      "enum": [
+        "low",
+        "moderate",
+        "high",
+        "very_high"
+      ]
+    }
+  },
+  "required": [
+    "user_email"
+  ]
+}
+{
+  "name": "WeightEntry",
+  "type": "object",
+  "properties": {
+    "user_email": {
+      "type": "string"
+    },
+    "weight_lbs": {
+      "type": "number"
+    },
+    "bmi": {
+      "type": "number"
+    },
+    "waist_inches": {
+      "type": "number"
+    },
+    "body_fat_percentage": {
+      "type": "number"
+    },
+    "notes": {
+      "type": "string"
+    },
+    "entry_date": {
+      "type": "string",
+      "format": "date"
+    }
+  },
+  "required": [
+    "user_email",
+    "weight_lbs",
+    "entry_date"
+  ]
+}
+
+{
+  "name": "MealLog",
+  "type": "object",
+  "properties": {
+    "user_email": {
+      "type": "string"
+    },
+    "meal_type": {
+      "type": "string",
+      "enum": [
+        "breakfast",
+        "lunch",
+        "dinner",
+        "snack"
+      ]
+    },
+    "meal_description": {
+      "type": "string"
+    },
+    "calories": {
+      "type": "number"
+    },
+    "protein_g": {
+      "type": "number"
+    },
+    "carbs_g": {
+      "type": "number"
+    },
+    "fat_g": {
+      "type": "number"
+    },
+    "fiber_g": {
+      "type": "number"
+    },
+    "sugar_g": {
+      "type": "number"
+    },
+    "portion_size": {
+      "type": "string"
+    },
+    "healthiness_score": {
+      "type": "number",
+      "description": "Score from 0-10"
+    },
+    "ai_suggestions": {
+      "type": "string",
+      "description": "AI-generated healthy alternatives"
+    },
+    "meal_date": {
+      "type": "string",
+      "format": "date"
+    },
+    "meal_time": {
+      "type": "string"
+    },
+    "photo_url": {
+      "type": "string"
+    }
+  },
+  "required": [
+    "user_email",
+    "meal_type",
+    "meal_description",
+    "meal_date"
+  ]
+}
+
+{
+  "name": "ActivityLog",
+  "type": "object",
+  "properties": {
+    "user_email": {
+      "type": "string"
+    },
+    "activity_type": {
+      "type": "string",
+      "enum": [
+        "walking",
+        "running",
+        "cycling",
+        "swimming",
+        "yoga",
+        "strength_training",
+        "sports",
+        "dancing",
+        "hiking",
+        "other"
+      ]
+    },
+    "duration_minutes": {
+      "type": "number"
+    },
+    "calories_burned": {
+      "type": "number"
+    },
+    "intensity": {
+      "type": "string",
+      "enum": [
+        "low",
+        "moderate",
+        "high",
+        "very_high"
+      ]
+    },
+    "distance_miles": {
+      "type": "number"
+    },
+    "steps": {
+      "type": "number"
+    },
+    "heart_rate_avg": {
+      "type": "number"
+    },
+    "notes": {
+      "type": "string"
+    },
+    "activity_date": {
+      "type": "string",
+      "format": "date"
+    },
+    "activity_time": {
+      "type": "string"
+    }
+  },
+  "required": [
+    "user_email",
+    "activity_type",
+    "duration_minutes",
+    "activity_date"
+  ]
+}
+
+{
+  "name": "SleepLog",
+  "type": "object",
+  "properties": {
+    "user_email": {
+      "type": "string"
+    },
+    "sleep_date": {
+      "type": "string",
+      "format": "date"
+    },
+    "bedtime": {
+      "type": "string"
+    },
+    "wake_time": {
+      "type": "string"
+    },
+    "total_hours": {
+      "type": "number"
+    },
+    "quality": {
+      "type": "string",
+      "enum": [
+        "poor",
+        "fair",
+        "good",
+        "excellent"
+      ]
+    },
+    "deep_sleep_hours": {
+      "type": "number"
+    },
+    "rem_sleep_hours": {
+      "type": "number"
+    },
+    "times_awake": {
+      "type": "number"
+    },
+    "notes": {
+      "type": "string"
+    }
+  },
+  "required": [
+    "user_email",
+    "sleep_date",
+    "total_hours"
+  ]
+}
+
+{
+  "name": "StressLog",
+  "type": "object",
+  "properties": {
+    "user_email": {
+      "type": "string"
+    },
+    "log_date": {
+      "type": "string",
+      "format": "date"
+    },
+    "stress_level": {
+      "type": "number",
+      "description": "Scale 1-10"
+    },
+    "mood": {
+      "type": "string",
+      "enum": [
+        "anxious",
+        "stressed",
+        "calm",
+        "happy",
+        "energetic",
+        "tired",
+        "overwhelmed"
+      ]
+    },
+    "triggers": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      }
+    },
+    "coping_activities": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      }
+    },
+    "meditation_minutes": {
+      "type": "number"
+    },
+    "journal_entry": {
+      "type": "string"
+    }
+  },
+  "required": [
+    "user_email",
+    "log_date",
+    "stress_level"
+  ]
+}
+
+{
+  "name": "Goal",
+  "type": "object",
+  "properties": {
+    "user_email": {
+      "type": "string"
+    },
+    "goal_type": {
+      "type": "string",
+      "enum": [
+        "weight_loss",
+        "exercise",
+        "nutrition",
+        "sleep",
+        "stress",
+        "glucose_control",
+        "custom"
+      ]
+    },
+    "title": {
+      "type": "string"
+    },
+    "description": {
+      "type": "string"
+    },
+    "target_value": {
+      "type": "number"
+    },
+    "current_value": {
+      "type": "number"
+    },
+    "unit": {
+      "type": "string"
+    },
+    "start_date": {
+      "type": "string",
+      "format": "date"
+    },
+    "target_date": {
+      "type": "string",
+      "format": "date"
+    },
+    "status": {
+      "type": "string",
+      "enum": [
+        "active",
+        "completed",
+        "paused",
+        "abandoned"
+      ],
+      "default": "active"
+ {
+  "name": "Challenge",
+  "type": "object",
+  "properties": {
+    "title": {
+      "type": "string"
+    },
+    "description": {
+      "type": "string"
+    },
+    "challenge_type": {
+      "type": "string",
+      "enum": [
+        "steps",
+        "distance",
+        "exercise_minutes",
+        "weight_loss",
+        "streak",
+        "community"
+      ]
+    },
+    "target_value": {
+      "type": "number"
+    },
+    "unit": {
+      "type": "string"
+    },
+    "start_date": {
+      "type": "string",
+      "format": "date"
+    },
+    "end_date": {
+      "type": "string",
+      "format": "date"
+    },
+    "points_reward": {
+      "type": "number"
+    },
+    "participants_count": {
+      "type": "number",
+      "default": 0
+    },
+    "is_active": {
+      "type": "boolean",
+      "default": true
+    }
+  },
+  "required": [
+    "title",
+    "challenge_type",
+    "target_value",
+    "start_date",
+    "end_date"
+  ]
+}{
+  "name": "ChallengeParticipant",
+  "type": "object",
+  "properties": {
+    "challenge_id": {
+      "type": "string"
+    },
+    "user_email": {
+      "type": "string"
+    },
+    "current_progress": {
+      "type": "number",
+      "default": 0
+    },
+    "progress_percentage": {
+      "type": "number",
+      "default": 0
+    },
+    "completed": {
+      "type": "boolean",
+      "default": false
+    },
+    "completion_date": {
+      "type": "string",
+      "format": "date"
+    },
+    "points_earned": {
+      "type": "number",
+      "default": 0
+    }
+  },
+  "required": [
+    "challenge_id",
+    "user_email"
+  ]
+}{
+  "name": "CommunityPost",
+  "type": "object",
+  "properties": {
+    "user_email": {
+      "type": "string"
+    },
+    "author_name": {
+      "type": "string"
+    },
+    "content": {
+      "type": "string"
+    },
+    "post_type": {
+      "type": "string",
+      "enum": [
+        "milestone",
+        "recipe",
+        "tip",
+        "question",
+        "motivation",
+        "progress_photo"
+      ]
+    },
+    "image_url": {
+      "type": "string"
+    },
+    "likes_count": {
+      "type": "number",
+      "default": 0
+    },
+    "comments_count": {
+      "type": "number",
+      "default": 0
+    },
+    "tags": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      }
+    }
+  },
+  "required": [
+    "user_email",
+    "content",
+    "post_type"
+  ]
+}
+
+{
+  "name": "CommunityPost",
+  "type": "object",
+  "properties": {
+    "user_email": {
+      "type": "string"
+    },
+    "author_name": {
+      "type": "string"
+    },
+    "content": {
+      "type": "string"
+    },
+    "post_type": {
+      "type": "string",
+      "enum": [
+        "milestone",
+        "recipe",
+        "tip",
+        "question",
+        "motivation",
+        "progress_photo"
+      ]
+    },
+    "image_url": {
+      "type": "string"
+    },
+    "likes_count": {
+      "type": "number",
+      "default": 0
+    },
+    "comments_count": {
+      "type": "number",
+      "default": 0
+    },
+    "tags": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      }
+    }
+  },
+  "required": [
+    "user_email",
+    "content",
+    "post_type"
+  ]
+}
