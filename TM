@@ -1,0 +1,390 @@
+import React, { useState, useEffect } from "react";
+import { base44 } from "@/api/base44Client";
+import { useQuery } from "@tanstack/react-query";
+import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import { Button } from "@/components/ui/button";
+import { Badge } from "@/components/ui/badge";
+import { Progress } from "@/components/ui/progress";
+import { Slider } from "@/components/ui/slider";
+import { Label } from "@/components/ui/label";
+import { 
+  Clock,
+  TrendingUp,
+  TrendingDown,
+  AlertTriangle,
+  CheckCircle,
+  Zap,
+  Calendar,
+  Target,
+  Activity,
+  Heart,
+  BarChart3,
+  Sparkles,
+  RefreshCw,
+  PlayCircle,
+  PauseCircle
+} from "lucide-react";
+import { format, addMonths } from "date-fns";
+import { LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, ReferenceLine, Area, AreaChart, Legend } from "recharts";
+
+export default function TimeMachine() {
+  const [user, setUser] = useState(null);
+  const [loading, setLoading] = useState(false);
+  const [timeTravel, setTimeTravel] = useState(6);
+  const [scenarioParams, setScenarioParams] = useState({
+    weeklyExercise: 3,
+    dailyCalories: 2000,
+    sleepHours: 7,
+    stressLevel: 5
+  });
+  const [predictions, setPredictions] = useState(null);
+  const [alternateScenarios, setAlternateScenarios] = useState([]);
+  const [simulationRunning, setSimulationRunning] = useState(false);
+  const [currentTime, setCurrentTime] = useState(0);
+
+  useEffect(() => {
+    const loadUser = async () => {
+      try {
+        const userData = await base44.auth.me();
+        setUser(userData);
+      } catch (error) {
+        console.error("Error loading user:", error);
+      }
+    };
+    loadUser();
+  }, []);
+
+  const { data: healthProfile } = useQuery({
+    queryKey: ["healthProfile", user?.email],
+    queryFn: async () => {
+      const profiles = await base44.entities.HealthProfile.filter({ user_email: user?.email });
+      return profiles[0];
+    },
+    enabled: !!user?.email,
+  });
+
+  const { data: weightHistory = [] } = useQuery({
+    queryKey: ["weightHistory", user?.email],
+    queryFn: async () => {
+      return await base44.entities.WeightEntry.filter({ user_email: user?.email }, "-entry_date", 30);
+    },
+    enabled: !!user?.email,
+  });
+
+  const { data: recentActivity = [] } = useQuery({
+    queryKey: ["recentActivity", user?.email],
+    queryFn: async () => {
+      return await base44.entities.ActivityLog.filter({ user_email: user?.email }, "-activity_date", 30);
+    },
+    enabled: !!user?.email,
+  });
+
+  const { data: recentMeals = [] } = useQuery({
+    queryKey: ["recentMeals", user?.email],
+    queryFn: async () => {
+      return await base44.entities.MealLog.filter({ user_email: user?.email }, "-meal_date", 30);
+    },
+    enabled: !!user?.email,
+  });
+
+  const generatePredictions = async () => {
+    if (!healthProfile) return;
+    
+    setLoading(true);
+    try {
+      const avgWeeklyExercise = recentActivity.length > 0
+        ? (recentActivity.reduce((sum, a) => sum + (a.duration_minutes || 0), 0) / 4.3).toFixed(0)
+        : 0;
+      
+      const avgDailyCalories = recentMeals.length > 0
+        ? (recentMeals.reduce((sum, m) => sum + (m.calories || 0), 0) / recentMeals.length).toFixed(0)
+        : 2000;
+
+      const currentBehavior = `
+Analyze this user's health trajectory and predict their future outcomes:
+
+CURRENT HEALTH DATA:
+- Current Weight: ${healthProfile.current_weight_lbs} lbs
+- Target Weight: ${healthProfile.target_weight_lbs} lbs
+- Current BMI: ${healthProfile.bmi?.toFixed(1)}
+- Current Health Score: ${healthProfile.health_score}/100
+- Age: ${healthProfile.age}
+- Gender: ${healthProfile.gender}
+- Activity Level: ${healthProfile.activity_level}
+- Average Weekly Exercise: ${avgWeeklyExercise} minutes
+- Average Daily Calories: ${avgDailyCalories}
+- Sleep Average: ${healthProfile.sleep_hours_avg} hours
+- Stress Level: ${healthProfile.stress_level}
+- Family History: ${healthProfile.family_history_diabetes ? "Diabetes" : "None"}
+- Risk Level: ${healthProfile.risk_level}
+
+USER'S PLANNED BEHAVIOR (Next ${timeTravel} months):
+- Weekly Exercise: ${scenarioParams.weeklyExercise} days (60 min each)
+- Daily Calories: ${scenarioParams.dailyCalories}
+- Sleep Hours: ${scenarioParams.sleepHours}
+- Stress Level: ${scenarioParams.stressLevel}/10
+
+TASK: Predict health outcomes ${timeTravel} months from now based on these behaviors.
+
+Provide month-by-month projections for each month (1 to ${timeTravel}) including:
+1. Weight trajectory (realistic weight changes)
+2. BMI changes
+3. Health score progression (0-100)
+4. Risk level at each milestone
+5. Key milestones or warnings
+
+Also provide:
+- Final state predictions (weight, BMI, health score, disease risks)
+- 3 alternate scenarios (Best Case, Current Path, Worst Case)
+- Health warnings
+- Improvement opportunities
+
+Use realistic medical algorithms - average weight loss is 1-2 lbs/week with good behavior.`;
+
+      const result = await base44.integrations.Core.InvokeLLM({
+        prompt: currentBehavior,
+        response_json_schema: {
+          type: "object",
+          properties: {
+            monthly_predictions: {
+              type: "array",
+              items: {
+                type: "object",
+                properties: {
+                  month: { type: "number" },
+                  weight: { type: "number" },
+                  bmi: { type: "number" },
+                  health_score: { type: "number" },
+                  risk_level: { type: "string" },
+                  key_milestone: { type: "string" }
+                }
+              }
+            },
+            final_state: {
+              type: "object",
+              properties: {
+                weight: { type: "number" },
+                bmi: { type: "number" },
+                health_score: { type: "number" },
+                diabetes_risk: { type: "number" },
+                heart_disease_risk: { type: "number" },
+                summary: { type: "string" }
+              }
+            },
+            alternate_scenarios: {
+              type: "array",
+              items: {
+                type: "object",
+                properties: {
+                  name: { type: "string" },
+                  description: { type: "string" },
+                  final_weight: { type: "number" },
+                  final_health_score: { type: "number" },
+                  outcome: { type: "string" }
+                }
+              }
+            },
+            warnings: {
+              type: "array",
+              items: { type: "string" }
+            },
+            opportunities: {
+              type: "array",
+              items: { type: "string" }
+            }
+          }
+        }
+      });
+
+      setPredictions(result);
+      setAlternateScenarios(result.alternate_scenarios || []);
+    } catch (error) {
+      console.error("Error generating predictions:", error);
+    }
+    setLoading(false);
+  };
+
+  useEffect(() => {
+    if (healthProfile && !predictions) {
+      generatePredictions();
+    }
+  }, [healthProfile]);
+
+  const runSimulation = () => {
+    setSimulationRunning(true);
+    setCurrentTime(0);
+    
+    const interval = setInterval(() => {
+      setCurrentTime(prev => {
+        if (prev >= timeTravel) {
+          setSimulationRunning(false);
+          clearInterval(interval);
+          return timeTravel;
+        }
+        return prev + 0.1;
+      });
+    }, 100);
+  };
+
+  const getHealthScoreColor = (score) => {
+    if (score >= 80) return "text-green-600";
+    if (score >= 60) return "text-yellow-600";
+    if (score >= 40) return "text-orange-600";
+    return "text-red-600";
+  };
+
+  const getRiskColor = (risk) => {
+    const colors = {
+      low: "bg-green-100 text-green-800 border-green-200",
+      moderate: "bg-yellow-100 text-yellow-800 border-yellow-200",
+      high: "bg-orange-100 text-orange-800 border-orange-200",
+      very_high: "bg-red-100 text-red-800 border-red-200"
+    };
+    return colors[risk] || colors.moderate;
+  };
+
+  if (!healthProfile) {
+    return (
+      <div className="p-8 max-w-4xl mx-auto">
+        <Card className="border-none shadow-lg">
+          <CardContent className="p-12 text-center">
+            <Clock className="w-16 h-16 text-slate-300 mx-auto mb-4" />
+            <p className="text-slate-500">Complete your health profile to access the Time Machine</p>
+          </CardContent>
+        </Card>
+      </div>
+    );
+  }
+
+  return (
+    <div className="p-4 md:p-8 space-y-6">
+      {/* Header */}
+      <div className="flex flex-col md:flex-row justify-between items-start md:items-center gap-4">
+        <div>
+          <div className="flex items-center gap-3 mb-2">
+            <div className="w-14 h-14 bg-gradient-to-br from-cyan-500 via-blue-500 to-purple-600 rounded-2xl flex items-center justify-center shadow-xl">
+              <Clock className="w-8 h-8 text-white" />
+            </div>
+            <div>
+              <h1 className="text-3xl md:text-4xl font-bold text-slate-900">Health Time Machine</h1>
+              <p className="text-slate-500">See your future, change your destiny</p>
+            </div>
+          </div>
+        </div>
+        <Badge className="bg-gradient-to-r from-cyan-500 to-purple-600 text-white border-0 text-base py-2 px-4">
+          <Sparkles className="w-4 h-4 mr-2" />
+          AI Predictions
+        </Badge>
+      </div>
+
+      {/* Time Travel Controls */}
+      <Card className="border-none shadow-2xl bg-gradient-to-br from-slate-900 to-slate-800 text-white overflow-hidden relative">
+        <div className="absolute inset-0 bg-gradient-to-r from-cyan-500/20 to-purple-500/20" />
+        <CardContent className="p-8 relative">
+          <div className="flex items-center justify-between mb-6">
+            <div>
+              <h2 className="text-2xl font-bold mb-1">Time Travel to Future</h2>
+              <p className="text-white/70">Adjust the timeline and see predicted outcomes</p>
+            </div>
+            {simulationRunning ? (
+              <Button
+                onClick={() => setSimulationRunning(false)}
+                className="bg-red-500 hover:bg-red-600"
+              >
+                <PauseCircle className="w-5 h-5 mr-2" />
+                Pause
+              </Button>
+            ) : (
+              <Button
+                onClick={runSimulation}
+                className="bg-green-500 hover:bg-green-600"
+              >
+                <PlayCircle className="w-5 h-5 mr-2" />
+                Run Simulation
+              </Button>
+            )}
+          </div>
+
+          <div className="space-y-6">
+            <div>
+              <div className="flex justify-between mb-3">
+                <Label className="text-white text-lg">Time Travel: {timeTravel} months</Label>
+                <span className="text-cyan-400 font-mono text-xl">
+                  {format(addMonths(new Date(), timeTravel), "MMM yyyy")}
+                </span>
+              </div>
+              <Slider
+                value={[timeTravel]}
+                onValueChange={(value) => setTimeTravel(value[0])}
+                max={24}
+                min={1}
+                step={1}
+                className="w-full"
+              />
+              <div className="flex justify-between text-sm text-white/60 mt-2">
+                <span>1 month</span>
+                <span>12 months</span>
+                <span>24 months</span>
+              </div>
+            </div>
+
+            {simulationRunning && (
+              <div className="p-4 bg-white/10 rounded-xl backdrop-blur">
+                <div className="flex items-center justify-between mb-2">
+                  <span className="text-cyan-400 font-semibold">Simulation Progress</span>
+                  <span className="text-white font-mono">{Math.floor((currentTime / timeTravel) * 100)}%</span>
+                </div>
+                <Progress value={(currentTime / timeTravel) * 100} className="h-3" />
+                <p className="text-white/70 text-sm mt-2">
+                  Currently at: {format(addMonths(new Date(), Math.floor(currentTime)), "MMM yyyy")}
+                </p>
+              </div>
+            )}
+          </div>
+        </CardContent>
+      </Card>
+
+      {/* Scenario Parameters */}
+      <Card className="border-none shadow-lg">
+        <CardHeader className="border-b border-slate-100">
+          <CardTitle className="flex items-center gap-2">
+            <Target className="w-5 h-5 text-cyan-600" />
+            Adjust Your Lifestyle Scenario
+          </CardTitle>
+        </CardHeader>
+        <CardContent className="p-6">
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+            <div>
+              <Label className="mb-3 block">
+                Weekly Exercise Days: {scenarioParams.weeklyExercise} days
+              </Label>
+              <Slider
+                value={[scenarioParams.weeklyExercise]}
+                onValueChange={(value) => setScenarioParams({...scenarioParams, weeklyExercise: value[0]})}
+                max={7}
+                min={0}
+                step={1}
+              />
+            </div>
+
+            <div>
+              <Label className="mb-3 block">
+                Daily Calories: {scenarioParams.dailyCalories} cal
+              </Label>
+              <Slider
+                value={[scenarioParams.dailyCalories]}
+                onValueChange={(value) => setScenarioParams({...scenarioParams, dailyCalories: value[0]})}
+                max={3000}
+                min={1200}
+                step={100}
+              />
+            </div>
+
+            <div>
+              <Label className="mb-3 block">
+                Sleep Hours: {scenarioParams.sleepHours}h
+              </Label>
+              <Slider
+                value={[scenarioParams.sleepHours]}
+                onValueChange={(value) => setScenarioParams({...scenarioParams, sleepHours: value[0]})}
+ 
