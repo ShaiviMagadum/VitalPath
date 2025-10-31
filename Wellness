@@ -1,0 +1,430 @@
+import React, { useState, useEffect } from "react";
+import { base44 } from "@/api/base44Client";
+import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
+import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import { Button } from "@/components/ui/button";
+import { Input } from "@/components/ui/input";
+import { Label } from "@/components/ui/label";
+import { Textarea } from "@/components/ui/textarea";
+import { Badge } from "@/components/ui/badge";
+import { Moon, Brain, Heart, Plus, Smile, Frown, Meh } from "lucide-react";
+import { format } from "date-fns";
+
+export default function Wellness() {
+  const [user, setUser] = useState(null);
+  const [showSleepForm, setShowSleepForm] = useState(false);
+  const [showStressForm, setShowStressForm] = useState(false);
+  const [selectedDate, setSelectedDate] = useState(format(new Date(), "yyyy-MM-dd"));
+  const queryClient = useQueryClient();
+
+  const [sleepData, setSleepData] = useState({
+    sleep_date: selectedDate,
+    bedtime: "",
+    wake_time: "",
+    total_hours: "",
+    quality: "good",
+    notes: ""
+  });
+
+  const [stressData, setStressData] = useState({
+    log_date: selectedDate,
+    stress_level: 5,
+    mood: "calm",
+    triggers: [],
+    meditation_minutes: "",
+    journal_entry: ""
+  });
+
+  useEffect(() => {
+    const loadUser = async () => {
+      const userData = await base44.auth.me();
+      setUser(userData);
+    };
+    loadUser();
+  }, []);
+
+  const { data: recentSleep = [] } = useQuery({
+    queryKey: ["sleep", user?.email],
+    queryFn: async () => {
+      return await base44.entities.SleepLog.filter({ user_email: user?.email }, "-sleep_date", 7);
+    },
+    enabled: !!user?.email,
+  });
+
+  const { data: recentStress = [] } = useQuery({
+    queryKey: ["stress", user?.email],
+    queryFn: async () => {
+      return await base44.entities.StressLog.filter({ user_email: user?.email }, "-log_date", 7);
+    },
+    enabled: !!user?.email,
+  });
+
+  const createSleepMutation = useMutation({
+    mutationFn: async (sleep) => {
+      return await base44.entities.SleepLog.create({
+        ...sleep,
+        user_email: user.email,
+        total_hours: parseFloat(sleep.total_hours)
+      });
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["sleep"] });
+      setShowSleepForm(false);
+      setSleepData({
+        sleep_date: selectedDate,
+        bedtime: "",
+        wake_time: "",
+        total_hours: "",
+        quality: "good",
+        notes: ""
+      });
+    },
+  });
+
+  const createStressMutation = useMutation({
+    mutationFn: async (stress) => {
+      return await base44.entities.StressLog.create({
+        ...stress,
+        user_email: user.email,
+        stress_level: parseInt(stress.stress_level),
+        meditation_minutes: stress.meditation_minutes ? parseFloat(stress.meditation_minutes) : undefined
+      });
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["stress"] });
+      setShowStressForm(false);
+      setStressData({
+        log_date: selectedDate,
+        stress_level: 5,
+        mood: "calm",
+        triggers: [],
+        meditation_minutes: "",
+        journal_entry: ""
+      });
+    },
+  });
+
+  const avgSleepHours = recentSleep.length > 0
+    ? (recentSleep.reduce((sum, s) => sum + s.total_hours, 0) / recentSleep.length).toFixed(1)
+    : 0;
+
+  const avgStressLevel = recentStress.length > 0
+    ? (recentStress.reduce((sum, s) => sum + s.stress_level, 0) / recentStress.length).toFixed(1)
+    : 0;
+
+  const getQualityColor = (quality) => {
+    const colors = {
+      poor: "bg-red-100 text-red-800 border-red-200",
+      fair: "bg-yellow-100 text-yellow-800 border-yellow-200",
+      good: "bg-green-100 text-green-800 border-green-200",
+      excellent: "bg-emerald-100 text-emerald-800 border-emerald-200"
+    };
+    return colors[quality] || colors.good;
+  };
+
+  const getMoodIcon = (mood) => {
+    if (["happy", "energetic", "calm"].includes(mood)) return <Smile className="w-5 h-5 text-green-600" />;
+    if (["stressed", "anxious", "overwhelmed"].includes(mood)) return <Frown className="w-5 h-5 text-red-600" />;
+    return <Meh className="w-5 h-5 text-yellow-600" />;
+  };
+
+  return (
+    <div className="p-4 md:p-8 space-y-6">
+      <div>
+        <h1 className="text-3xl md:text-4xl font-bold text-slate-900">Sleep & Wellness</h1>
+        <p className="text-slate-500 mt-1">Rest, recover, and manage stress</p>
+      </div>
+
+      {/* Stats Overview */}
+      <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+        <Card className="border-none shadow-lg bg-gradient-to-br from-purple-50 to-purple-100">
+          <CardContent className="p-6">
+            <div className="flex items-center justify-between mb-3">
+              <Moon className="w-8 h-8 text-purple-600" />
+              <span className="text-sm font-semibold text-purple-900">AVG SLEEP</span>
+            </div>
+            <div className="text-3xl font-bold text-slate-900">{avgSleepHours}</div>
+            <p className="text-sm text-slate-600 mt-1">hours per night</p>
+          </CardContent>
+        </Card>
+
+        <Card className="border-none shadow-lg bg-gradient-to-br from-pink-50 to-pink-100">
+          <CardContent className="p-6">
+            <div className="flex items-center justify-between mb-3">
+              <Brain className="w-8 h-8 text-pink-600" />
+              <span className="text-sm font-semibold text-pink-900">AVG STRESS</span>
+            </div>
+            <div className="text-3xl font-bold text-slate-900">{avgStressLevel}/10</div>
+            <p className="text-sm text-slate-600 mt-1">last 7 days</p>
+          </CardContent>
+        </Card>
+
+        <Card className="border-none shadow-lg bg-gradient-to-br from-teal-50 to-teal-100">
+          <CardContent className="p-6">
+            <div className="flex items-center justify-between mb-3">
+              <Heart className="w-8 h-8 text-teal-600" />
+              <span className="text-sm font-semibold text-teal-900">WELLBEING</span>
+            </div>
+            <div className="text-3xl font-bold text-slate-900">
+              {avgSleepHours >= 7 && avgStressLevel <= 5 ? "Good" : "Needs Care"}
+            </div>
+          </CardContent>
+        </Card>
+      </div>
+
+      {/* Quick Actions */}
+      <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+        <Card className="border-none shadow-lg hover:shadow-xl transition-shadow cursor-pointer" onClick={() => setShowSleepForm(!showSleepForm)}>
+          <CardContent className="p-6 text-center">
+            <Moon className="w-12 h-12 text-purple-600 mx-auto mb-3" />
+            <h3 className="font-semibold text-slate-900 mb-2">Log Sleep</h3>
+            <p className="text-sm text-slate-600">Track your sleep quality</p>
+          </CardContent>
+        </Card>
+
+        <Card className="border-none shadow-lg hover:shadow-xl transition-shadow cursor-pointer" onClick={() => setShowStressForm(!showStressForm)}>
+          <CardContent className="p-6 text-center">
+            <Brain className="w-12 h-12 text-pink-600 mx-auto mb-3" />
+            <h3 className="font-semibold text-slate-900 mb-2">Log Stress</h3>
+            <p className="text-sm text-slate-600">Monitor your mental health</p>
+          </CardContent>
+        </Card>
+      </div>
+
+      {/* Sleep Form */}
+      {showSleepForm && (
+        <Card className="border-none shadow-xl">
+          <CardHeader className="border-b border-slate-100">
+            <CardTitle className="flex items-center gap-2">
+              <Moon className="w-5 h-5 text-purple-600" />
+              Log Sleep
+            </CardTitle>
+          </CardHeader>
+          <CardContent className="p-6 space-y-4">
+            <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+              <div className="space-y-2">
+                <Label htmlFor="sleep_date">Date</Label>
+                <Input
+                  id="sleep_date"
+                  type="date"
+                  value={sleepData.sleep_date}
+                  onChange={(e) => setSleepData({ ...sleepData, sleep_date: e.target.value })}
+                />
+              </div>
+              <div className="space-y-2">
+                <Label htmlFor="bedtime">Bedtime</Label>
+                <Input
+                  id="bedtime"
+                  type="time"
+                  value={sleepData.bedtime}
+                  onChange={(e) => setSleepData({ ...sleepData, bedtime: e.target.value })}
+                />
+              </div>
+              <div className="space-y-2">
+                <Label htmlFor="wake_time">Wake Time</Label>
+                <Input
+                  id="wake_time"
+                  type="time"
+                  value={sleepData.wake_time}
+                  onChange={(e) => setSleepData({ ...sleepData, wake_time: e.target.value })}
+                />
+              </div>
+            </div>
+
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+              <div className="space-y-2">
+                <Label htmlFor="total_hours">Total Hours</Label>
+                <Input
+                  id="total_hours"
+                  type="number"
+                  step="0.5"
+                  placeholder="7.5"
+                  value={sleepData.total_hours}
+                  onChange={(e) => setSleepData({ ...sleepData, total_hours: e.target.value })}
+                />
+              </div>
+              <div className="space-y-2">
+                <Label htmlFor="quality">Sleep Quality</Label>
+                <select
+                  id="quality"
+                  value={sleepData.quality}
+                  onChange={(e) => setSleepData({ ...sleepData, quality: e.target.value })}
+                  className="w-full px-3 py-2 border border-slate-200 rounded-md"
+                >
+                  <option value="poor">Poor</option>
+                  <option value="fair">Fair</option>
+                  <option value="good">Good</option>
+                  <option value="excellent">Excellent</option>
+                </select>
+              </div>
+            </div>
+
+            <div className="space-y-2">
+              <Label htmlFor="sleep_notes">Notes</Label>
+              <Input
+                id="sleep_notes"
+                placeholder="How did you sleep?"
+                value={sleepData.notes}
+                onChange={(e) => setSleepData({ ...sleepData, notes: e.target.value })}
+              />
+            </div>
+
+            <div className="flex justify-end gap-3">
+              <Button variant="outline" onClick={() => setShowSleepForm(false)}>
+                Cancel
+              </Button>
+              <Button
+                onClick={() => createSleepMutation.mutate(sleepData)}
+                disabled={!sleepData.total_hours}
+                className="bg-gradient-to-r from-purple-500 to-purple-600 hover:from-purple-600 hover:to-purple-700"
+              >
+                Log Sleep
+              </Button>
+            </div>
+          </CardContent>
+        </Card>
+      )}
+
+      {/* Stress Form */}
+      {showStressForm && (
+        <Card className="border-none shadow-xl">
+          <CardHeader className="border-b border-slate-100">
+            <CardTitle className="flex items-center gap-2">
+              <Brain className="w-5 h-5 text-pink-600" />
+              Log Stress & Mood
+            </CardTitle>
+          </CardHeader>
+          <CardContent className="p-6 space-y-4">
+            <div className="space-y-2">
+              <Label htmlFor="stress_level">Stress Level (1-10)</Label>
+              <div className="flex items-center gap-4">
+                <Input
+                  id="stress_level"
+                  type="range"
+                  min="1"
+                  max="10"
+                  value={stressData.stress_level}
+                  onChange={(e) => setStressData({ ...stressData, stress_level: e.target.value })}
+                  className="flex-1"
+                />
+                <span className="text-2xl font-bold text-slate-900 w-12 text-center">
+                  {stressData.stress_level}
+                </span>
+              </div>
+            </div>
+
+            <div className="space-y-2">
+              <Label htmlFor="mood">Current Mood</Label>
+              <select
+                id="mood"
+                value={stressData.mood}
+                onChange={(e) => setStressData({ ...stressData, mood: e.target.value })}
+                className="w-full px-3 py-2 border border-slate-200 rounded-md"
+              >
+                <option value="happy">Happy 😊</option>
+                <option value="calm">Calm 😌</option>
+                <option value="energetic">Energetic ⚡</option>
+                <option value="stressed">Stressed 😰</option>
+                <option value="anxious">Anxious 😟</option>
+                <option value="tired">Tired 😴</option>
+                <option value="overwhelmed">Overwhelmed 😵</option>
+              </select>
+            </div>
+
+            <div className="space-y-2">
+              <Label htmlFor="meditation">Meditation/Relaxation (minutes)</Label>
+              <Input
+                id="meditation"
+                type="number"
+                placeholder="15"
+                value={stressData.meditation_minutes}
+                onChange={(e) => setStressData({ ...stressData, meditation_minutes: e.target.value })}
+              />
+            </div>
+
+            <div className="space-y-2">
+              <Label htmlFor="journal">Journal Entry</Label>
+              <Textarea
+                id="journal"
+                placeholder="How are you feeling today? What's on your mind?"
+                value={stressData.journal_entry}
+                onChange={(e) => setStressData({ ...stressData, journal_entry: e.target.value })}
+                rows={4}
+              />
+            </div>
+
+            <div className="flex justify-end gap-3">
+              <Button variant="outline" onClick={() => setShowStressForm(false)}>
+                Cancel
+              </Button>
+              <Button
+                onClick={() => createStressMutation.mutate(stressData)}
+                className="bg-gradient-to-r from-pink-500 to-pink-600 hover:from-pink-600 hover:to-pink-700"
+              >
+                Log Entry
+              </Button>
+            </div>
+          </CardContent>
+        </Card>
+      )}
+
+      {/* Recent Sleep Logs */}
+      <Card className="border-none shadow-lg">
+        <CardHeader className="border-b border-slate-100">
+          <CardTitle className="flex items-center gap-2">
+            <Moon className="w-5 h-5 text-purple-600" />
+            Recent Sleep Logs
+          </CardTitle>
+        </CardHeader>
+        <CardContent className="p-6">
+          {recentSleep.length === 0 ? (
+            <p className="text-center text-slate-500 py-8">No sleep logs yet</p>
+          ) : (
+            <div className="space-y-3">
+              {recentSleep.map((sleep) => (
+                <div key={sleep.id} className="flex items-center justify-between p-4 bg-purple-50 rounded-xl">
+                  <div>
+                    <div className="flex items-center gap-2 mb-1">
+                      <span className="font-semibold text-slate-900">
+                        {format(new Date(sleep.sleep_date), "MMM d, yyyy")}
+                      </span>
+                      <Badge className={`${getQualityColor(sleep.quality)} border`}>
+                        {sleep.quality}
+                      </Badge>
+                    </div>
+                    <p className="text-sm text-slate-600">
+                      {sleep.bedtime} - {sleep.wake_time}
+                    </p>
+                    {sleep.notes && <p className="text-sm text-slate-600 mt-1 italic">{sleep.notes}</p>}
+                  </div>
+                  <div className="text-right">
+                    <div className="text-2xl font-bold text-purple-600">{sleep.total_hours}h</div>
+                  </div>
+                </div>
+              ))}
+            </div>
+          )}
+        </CardContent>
+      </Card>
+
+      {/* Recent Stress Logs */}
+      <Card className="border-none shadow-lg">
+        <CardHeader className="border-b border-slate-100">
+          <CardTitle className="flex items-center gap-2">
+            <Brain className="w-5 h-5 text-pink-600" />
+            Recent Mood Logs
+          </CardTitle>
+        </CardHeader>
+        <CardContent className="p-6">
+          {recentStress.length === 0 ? (
+            <p className="text-center text-slate-500 py-8">No mood logs yet</p>
+          ) : (
+            <div className="space-y-3">
+              {recentStress.map((stress) => (
+                <div key={stress.id} className="p-4 bg-pink-50 rounded-xl">
+                  <div className="flex items-start justify-between mb-2">
+                    <div className="flex items-center gap-2">
+                      {getMoodIcon(stress.mood)}
+                      <span className="font-semibold text-slate-900 capitalize">{stress.mood}</span>
+                      <span className="text-sm text-slate-500">
+ 
