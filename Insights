@@ -1,0 +1,390 @@
+import React, { useState, useEffect } from "react";
+import { base44 } from "@/api/base44Client";
+import { useQuery } from "@tanstack/react-query";
+import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import { Badge } from "@/components/ui/badge";
+import { 
+  TrendingUp, 
+  TrendingDown,
+  Activity,
+  Utensils,
+  Moon,
+  Brain,
+  AlertTriangle,
+  CheckCircle,
+  Sparkles,
+  Target,
+  Calendar,
+  BarChart3
+} from "lucide-react";
+import { format, subDays, startOfWeek, endOfWeek } from "date-fns";
+import { LineChart, Line, BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, Legend } from "recharts";
+
+export default function Insights() {
+  const [user, setUser] = useState(null);
+  const [insights, setInsights] = useState(null);
+  const [loading, setLoading] = useState(false);
+
+  useEffect(() => {
+    const loadUser = async () => {
+      const userData = await base44.auth.me();
+      setUser(userData);
+    };
+    loadUser();
+  }, []);
+
+  const { data: healthProfile } = useQuery({
+    queryKey: ["healthProfile", user?.email],
+    queryFn: async () => {
+      const profiles = await base44.entities.HealthProfile.filter({ user_email: user?.email });
+      return profiles[0];
+    },
+    enabled: !!user?.email,
+  });
+
+  const { data: weightHistory = [] } = useQuery({
+    queryKey: ["weightHistory", user?.email],
+    queryFn: async () => {
+      return await base44.entities.WeightEntry.filter({ user_email: user?.email }, "-entry_date", 30);
+    },
+    enabled: !!user?.email,
+  });
+
+  const { data: recentMeals = [] } = useQuery({
+    queryKey: ["recentMeals", user?.email],
+    queryFn: async () => {
+      const startDate = format(subDays(new Date(), 14), "yyyy-MM-dd");
+      const allMeals = await base44.entities.MealLog.filter({ user_email: user?.email }, "-meal_date");
+      return allMeals.filter(m => m.meal_date >= startDate);
+    },
+    enabled: !!user?.email,
+  });
+
+  const { data: recentActivities = [] } = useQuery({
+    queryKey: ["recentActivities", user?.email],
+    queryFn: async () => {
+      const startDate = format(subDays(new Date(), 14), "yyyy-MM-dd");
+      const allActivities = await base44.entities.ActivityLog.filter({ user_email: user?.email }, "-activity_date");
+      return allActivities.filter(a => a.activity_date >= startDate);
+    },
+    enabled: !!user?.email,
+  });
+
+  const { data: recentSleep = [] } = useQuery({
+    queryKey: ["recentSleep", user?.email],
+    queryFn: async () => {
+      return await base44.entities.SleepLog.filter({ user_email: user?.email }, "-sleep_date", 14);
+    },
+    enabled: !!user?.email,
+  });
+
+  useEffect(() => {
+    if (user && healthProfile && weightHistory.length > 0) {
+      generateAIInsights();
+    }
+  }, [user, healthProfile, weightHistory, recentMeals, recentActivities, recentSleep]);
+
+  const generateAIInsights = async () => {
+    setLoading(true);
+    try {
+      const avgCalories = recentMeals.reduce((sum, m) => sum + (m.calories || 0), 0) / Math.max(recentMeals.length, 1);
+      const avgActivity = recentActivities.reduce((sum, a) => sum + (a.duration_minutes || 0), 0) / Math.max(recentActivities.length, 1);
+      const avgSleep = recentSleep.reduce((sum, s) => sum + (s.total_hours || 0), 0) / Math.max(recentSleep.length, 1);
+      
+      const weightTrend = weightHistory.length > 1
+        ? weightHistory[0].weight_lbs - weightHistory[weightHistory.length - 1].weight_lbs
+        : 0;
+
+      const prompt = `Analyze this user's health data and provide personalized insights:
+
+Health Profile:
+- Age: ${healthProfile.age}, Gender: ${healthProfile.gender}
+- Current BMI: ${healthProfile.bmi?.toFixed(1)}
+- Health Score: ${healthProfile.health_score}/100
+- Risk Level: ${healthProfile.risk_level}
+- Activity Level: ${healthProfile.activity_level}
+- Average Sleep: ${avgSleep.toFixed(1)} hours
+- Weight Trend: ${weightTrend > 0 ? `Lost ${weightTrend.toFixed(1)} lbs` : `Gained ${Math.abs(weightTrend).toFixed(1)} lbs`} in 30 days
+
+Recent Activity:
+- Average daily exercise: ${avgActivity.toFixed(0)} minutes
+- Average daily calories: ${avgCalories.toFixed(0)}
+
+Provide:
+1. Top 3 health risks or concerns
+2. Top 3 positive trends or achievements
+3. 3 specific, actionable recommendations
+4. Predicted health score in 3 months if current trends continue
+5. Predicted BMI in 3 months if current trends continue
+
+Return valid JSON only.`;
+
+      const result = await base44.integrations.Core.InvokeLLM({
+        prompt,
+        response_json_schema: {
+          type: "object",
+          properties: {
+            risks: {
+              type: "array",
+              items: {
+                type: "object",
+                properties: {
+                  title: { type: "string" },
+                  description: { type: "string" },
+                  severity: { type: "string" }
+                }
+              }
+            },
+            achievements: {
+              type: "array",
+              items: {
+                type: "object",
+                properties: {
+                  title: { type: "string" },
+                  description: { type: "string" }
+                }
+              }
+            },
+            recommendations: {
+              type: "array",
+              items: {
+                type: "object",
+                properties: {
+                  title: { type: "string" },
+                  description: { type: "string" },
+                  priority: { type: "string" }
+                }
+              }
+            },
+            predictions: {
+              type: "object",
+              properties: {
+                health_score_3months: { type: "number" },
+                bmi_3months: { type: "number" },
+                summary: { type: "string" }
+              }
+            }
+          }
+        }
+      });
+
+      setInsights(result);
+    } catch (error) {
+      console.error("Error generating insights:", error);
+    }
+    setLoading(false);
+  };
+
+  // Prepare chart data
+  const weightChartData = weightHistory.slice().reverse().map(w => ({
+    date: format(new Date(w.entry_date), "MMM d"),
+    weight: w.weight_lbs,
+    bmi: w.bmi
+  }));
+
+  const activityChartData = Array.from({ length: 7 }, (_, i) => {
+    const date = format(subDays(new Date(), 6 - i), "yyyy-MM-dd");
+    const dayActivities = recentActivities.filter(a => a.activity_date === date);
+    const totalMinutes = dayActivities.reduce((sum, a) => sum + (a.duration_minutes || 0), 0);
+    const totalCalories = dayActivities.reduce((sum, a) => sum + (a.calories_burned || 0), 0);
+    
+    return {
+      date: format(new Date(date), "EEE"),
+      minutes: totalMinutes,
+      calories: totalCalories
+    };
+  });
+
+  const getSeverityColor = (severity) => {
+    const colors = {
+      high: "bg-red-100 text-red-800 border-red-200",
+      medium: "bg-yellow-100 text-yellow-800 border-yellow-200",
+      low: "bg-blue-100 text-blue-800 border-blue-200"
+    };
+    return colors[severity?.toLowerCase()] || colors.medium;
+  };
+
+  const getPriorityColor = (priority) => {
+    const colors = {
+      high: "bg-orange-100 text-orange-800 border-orange-200",
+      medium: "bg-cyan-100 text-cyan-800 border-cyan-200",
+      low: "bg-slate-100 text-slate-800 border-slate-200"
+    };
+    return colors[priority?.toLowerCase()] || colors.medium;
+  };
+
+  if (!healthProfile) {
+    return (
+      <div className="p-8 max-w-4xl mx-auto">
+        <Card className="border-none shadow-lg">
+          <CardContent className="p-12 text-center">
+            <BarChart3 className="w-16 h-16 text-slate-300 mx-auto mb-4" />
+            <p className="text-slate-500">Complete your health profile to see insights</p>
+          </CardContent>
+        </Card>
+      </div>
+    );
+  }
+
+  return (
+    <div className="p-4 md:p-8 space-y-6">
+      <div>
+        <h1 className="text-3xl md:text-4xl font-bold text-slate-900">Health Insights</h1>
+        <p className="text-slate-500 mt-1">AI-powered analysis of your health journey</p>
+      </div>
+
+      {/* Health Score Trend */}
+      <Card className="border-none shadow-lg">
+        <CardHeader className="border-b border-slate-100">
+          <CardTitle className="flex items-center gap-2">
+            <TrendingUp className="w-5 h-5 text-cyan-600" />
+            Health Score Overview
+          </CardTitle>
+        </CardHeader>
+        <CardContent className="p-6">
+          <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
+            <div className="p-6 bg-gradient-to-br from-cyan-50 to-teal-50 rounded-xl">
+              <p className="text-sm font-semibold text-cyan-900 mb-2">Current Score</p>
+              <p className="text-4xl font-bold text-slate-900">{healthProfile.health_score}/100</p>
+              <Badge className="mt-2 bg-cyan-200 text-cyan-900">
+                {healthProfile.risk_level?.replace("_", " ").toUpperCase()} RISK
+              </Badge>
+            </div>
+            <div className="p-6 bg-gradient-to-br from-purple-50 to-purple-100 rounded-xl">
+              <p className="text-sm font-semibold text-purple-900 mb-2">BMI</p>
+              <p className="text-4xl font-bold text-slate-900">{healthProfile.bmi?.toFixed(1)}</p>
+              <p className="text-sm text-slate-600 mt-2">
+                {healthProfile.bmi < 25 ? "Healthy range" : "Above target"}
+              </p>
+            </div>
+            <div className="p-6 bg-gradient-to-br from-green-50 to-green-100 rounded-xl">
+              <p className="text-sm font-semibold text-green-900 mb-2">Activity Level</p>
+              <p className="text-2xl font-bold text-slate-900 capitalize">
+                {healthProfile.activity_level?.replace("_", " ")}
+              </p>
+              <p className="text-sm text-slate-600 mt-2">Current status</p>
+            </div>
+          </div>
+        </CardContent>
+      </Card>
+
+      {/* Weight Trend Chart */}
+      {weightChartData.length > 1 && (
+        <Card className="border-none shadow-lg">
+          <CardHeader className="border-b border-slate-100">
+            <CardTitle className="flex items-center gap-2">
+              <TrendingDown className="w-5 h-5 text-purple-600" />
+              Weight Trend (Last 30 Days)
+            </CardTitle>
+          </CardHeader>
+          <CardContent className="p-6">
+            <ResponsiveContainer width="100%" height={300}>
+              <LineChart data={weightChartData}>
+                <CartesianGrid strokeDasharray="3 3" />
+                <XAxis dataKey="date" />
+                <YAxis />
+                <Tooltip />
+                <Legend />
+                <Line type="monotone" dataKey="weight" stroke="#8b5cf6" strokeWidth={3} name="Weight (lbs)" />
+              </LineChart>
+            </ResponsiveContainer>
+          </CardContent>
+        </Card>
+      )}
+
+      {/* Activity Chart */}
+      {activityChartData.length > 0 && (
+        <Card className="border-none shadow-lg">
+          <CardHeader className="border-b border-slate-100">
+            <CardTitle className="flex items-center gap-2">
+              <Activity className="w-5 h-5 text-blue-600" />
+              Weekly Activity
+            </CardTitle>
+          </CardHeader>
+          <CardContent className="p-6">
+            <ResponsiveContainer width="100%" height={300}>
+              <BarChart data={activityChartData}>
+                <CartesianGrid strokeDasharray="3 3" />
+                <XAxis dataKey="date" />
+                <YAxis />
+                <Tooltip />
+                <Legend />
+                <Bar dataKey="minutes" fill="#3b82f6" name="Minutes" />
+                <Bar dataKey="calories" fill="#10b981" name="Calories Burned" />
+              </BarChart>
+            </ResponsiveContainer>
+          </CardContent>
+        </Card>
+      )}
+
+      {/* AI Insights */}
+      {loading && (
+        <Card className="border-none shadow-lg">
+          <CardContent className="p-12 text-center">
+            <Sparkles className="w-12 h-12 text-cyan-600 mx-auto mb-4 animate-pulse" />
+            <p className="text-slate-600">Analyzing your health data...</p>
+          </CardContent>
+        </Card>
+      )}
+
+      {insights && (
+        <>
+          {/* Health Risks */}
+          {insights.risks && insights.risks.length > 0 && (
+            <Card className="border-none shadow-lg">
+              <CardHeader className="border-b border-slate-100">
+                <CardTitle className="flex items-center gap-2">
+                  <AlertTriangle className="w-5 h-5 text-orange-600" />
+                  Areas of Concern
+                </CardTitle>
+              </CardHeader>
+              <CardContent className="p-6">
+                <div className="space-y-4">
+                  {insights.risks.map((risk, index) => (
+                    <div key={index} className="p-4 bg-orange-50 rounded-xl border border-orange-200">
+                      <div className="flex items-start justify-between mb-2">
+                        <h3 className="font-semibold text-slate-900">{risk.title}</h3>
+                        <Badge className={`${getSeverityColor(risk.severity)} border`}>
+                          {risk.severity}
+                        </Badge>
+                      </div>
+                      <p className="text-sm text-slate-700">{risk.description}</p>
+                    </div>
+                  ))}
+                </div>
+              </CardContent>
+            </Card>
+          )}
+
+          {/* Achievements */}
+          {insights.achievements && insights.achievements.length > 0 && (
+            <Card className="border-none shadow-lg">
+              <CardHeader className="border-b border-slate-100">
+                <CardTitle className="flex items-center gap-2">
+                  <CheckCircle className="w-5 h-5 text-green-600" />
+                  Positive Trends
+                </CardTitle>
+              </CardHeader>
+              <CardContent className="p-6">
+                <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+                  {insights.achievements.map((achievement, index) => (
+                    <div key={index} className="p-4 bg-green-50 rounded-xl border-2 border-green-200">
+                      <div className="flex items-center gap-2 mb-2">
+                        <CheckCircle className="w-5 h-5 text-green-600" />
+                        <h3 className="font-semibold text-slate-900">{achievement.title}</h3>
+                      </div>
+                      <p className="text-sm text-slate-700">{achievement.description}</p>
+                    </div>
+                  ))}
+                </div>
+              </CardContent>
+            </Card>
+          )}
+
+          {/* Recommendations */}
+          {insights.recommendations && insights.recommendations.length > 0 && (
+            <Card className="border-none shadow-lg">
+              <CardHeader className="border-b border-slate-100">
+                <CardTitle className="flex items-center gap-2">
+                  <Target className="w-5 h-5 text-cyan-600" />
+ 
