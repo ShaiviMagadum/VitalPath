@@ -1,0 +1,390 @@
+import React, { useState, useEffect } from "react";
+import { base44 } from "@/api/base44Client";
+import { useQuery } from "@tanstack/react-query";
+import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import { Button } from "@/components/ui/button";
+import { Badge } from "@/components/ui/badge";
+import { Progress } from "@/components/ui/progress";
+import { 
+  Zap,
+  TrendingUp,
+  TrendingDown,
+  Activity,
+  Flame,
+  Heart,
+  Target,
+  Trophy,
+  Users,
+  Bell,
+  CheckCircle2,
+  Clock,
+  Award,
+  Sparkles,
+  ArrowUp,
+  ArrowDown,
+  Minus
+} from "lucide-react";
+import { format } from "date-fns";
+import { LineChart, Line, ResponsiveContainer } from "recharts";
+
+export default function LiveDashboard() {
+  const [user, setUser] = useState(null);
+  const [liveHealthScore, setLiveHealthScore] = useState(0);
+  const [scoreHistory, setScoreHistory] = useState([]);
+  const [lastUpdate, setLastUpdate] = useState(new Date());
+  const [notifications, setNotifications] = useState([]);
+  const [dailyMissions, setDailyMissions] = useState([]);
+  const [vitalCoins, setVitalCoins] = useState(0);
+
+  useEffect(() => {
+    const loadUser = async () => {
+      const userData = await base44.auth.me();
+      setUser(userData);
+    };
+    loadUser();
+  }, []);
+
+  const { data: healthProfile } = useQuery({
+    queryKey: ["healthProfile", user?.email],
+    queryFn: async () => {
+      const profiles = await base44.entities.HealthProfile.filter({ user_email: user?.email });
+      return profiles[0];
+    },
+    enabled: !!user?.email,
+  });
+
+  const { data: todayMeals = [] } = useQuery({
+    queryKey: ["todayMeals", user?.email],
+    queryFn: async () => {
+      const today = format(new Date(), "yyyy-MM-dd");
+      return await base44.entities.MealLog.filter({ user_email: user?.email, meal_date: today });
+    },
+    enabled: !!user?.email,
+    refetchInterval: 30000, // Refresh every 30 seconds
+  });
+
+  const { data: todayActivity = [] } = useQuery({
+    queryKey: ["todayActivity", user?.email],
+    queryFn: async () => {
+      const today = format(new Date(), "yyyy-MM-dd");
+      return await base44.entities.ActivityLog.filter({ user_email: user?.email, activity_date: today });
+    },
+    enabled: !!user?.email,
+    refetchInterval: 30000,
+  });
+
+  const { data: activeGoals = [] } = useQuery({
+    queryKey: ["activeGoals", user?.email],
+    queryFn: async () => {
+      return await base44.entities.Goal.filter({ user_email: user?.email, status: "active" });
+    },
+    enabled: !!user?.email,
+  });
+
+  const { data: allUsers = [] } = useQuery({
+    queryKey: ["allUsers"],
+    queryFn: async () => {
+      return await base44.entities.User.list();
+    },
+  });
+
+  // Calculate live health score
+  useEffect(() => {
+    if (!healthProfile) return;
+
+    const calculateLiveScore = () => {
+      let score = healthProfile.health_score || 70;
+      
+      // Boost for today's activities
+      const todayCalories = todayMeals.reduce((sum, m) => sum + (m.calories || 0), 0);
+      const todayMinutes = todayActivity.reduce((sum, a) => sum + (a.duration_minutes || 0), 0);
+      
+      if (todayMinutes >= 30) score += 5;
+      if (todayMinutes >= 60) score += 5;
+      if (todayCalories > 0 && todayCalories <= 2200) score += 3;
+      if (todayMeals.length >= 3) score += 2;
+      
+      // Cap at 100
+      score = Math.min(100, score);
+      
+      setLiveHealthScore(score);
+      setScoreHistory(prev => [...prev.slice(-20), { time: format(new Date(), "HH:mm"), score }]);
+      setLastUpdate(new Date());
+    };
+
+    calculateLiveScore();
+    const interval = setInterval(calculateLiveScore, 60000); // Update every minute
+
+    return () => clearInterval(interval);
+  }, [healthProfile, todayMeals, todayActivity]);
+
+  // Generate daily missions
+  useEffect(() => {
+    if (!user) return;
+
+    const missions = [
+      {
+        id: 1,
+        title: "Log 3 Meals Today",
+        description: "Track breakfast, lunch, and dinner",
+        progress: todayMeals.length,
+        target: 3,
+        coins: 50,
+        icon: <Flame className="w-5 h-5 text-orange-600" />,
+        completed: todayMeals.length >= 3
+      },
+      {
+        id: 2,
+        title: "30 Minutes of Exercise",
+        description: "Get your body moving",
+        progress: todayActivity.reduce((sum, a) => sum + (a.duration_minutes || 0), 0),
+        target: 30,
+        coins: 75,
+        icon: <Activity className="w-5 h-5 text-blue-600" />,
+        completed: todayActivity.reduce((sum, a) => sum + (a.duration_minutes || 0), 0) >= 30
+      },
+      {
+        id: 3,
+        title: "Drink 8 Glasses of Water",
+        description: "Stay hydrated throughout the day",
+        progress: 4,
+        target: 8,
+        coins: 25,
+        icon: <Heart className="w-5 h-5 text-cyan-600" />,
+        completed: false
+      },
+      {
+        id: 4,
+        title: "Log Your Weight",
+        description: "Track your progress",
+        progress: 0,
+        target: 1,
+        coins: 30,
+        icon: <TrendingDown className="w-5 h-5 text-purple-600" />,
+        completed: false
+      },
+      {
+        id: 5,
+        title: "Complete a Goal Task",
+        description: "Make progress on your goals",
+        progress: 0,
+        target: 1,
+        coins: 100,
+        icon: <Target className="w-5 h-5 text-green-600" />,
+        completed: false
+      }
+    ];
+
+    setDailyMissions(missions);
+
+    // Calculate coins earned
+    const earned = missions.filter(m => m.completed).reduce((sum, m) => sum + m.coins, 0);
+    setVitalCoins(earned);
+  }, [user, todayMeals, todayActivity]);
+
+  // Generate notifications
+  useEffect(() => {
+    if (!healthProfile) return;
+
+    const notifs = [];
+
+    if (todayActivity.length === 0 && new Date().getHours() > 16) {
+      notifs.push({
+        id: 1,
+        type: "warning",
+        title: "No Activity Today",
+        message: "You haven't logged any exercise yet. A quick 10-minute walk can boost your health score!",
+        time: "Just now",
+        icon: <Activity className="w-4 h-4" />
+      });
+    }
+
+    if (todayMeals.length === 0 && new Date().getHours() > 12) {
+      notifs.push({
+        id: 2,
+        type: "info",
+        title: "Meal Reminder",
+        message: "Don't forget to log your meals to track your nutrition.",
+        time: "5 min ago",
+        icon: <Flame className="w-4 h-4" />
+      });
+    }
+
+    if (liveHealthScore > healthProfile.health_score) {
+      notifs.push({
+        id: 3,
+        type: "success",
+        title: "Health Score Increased!",
+        message: `Your score is up ${(liveHealthScore - healthProfile.health_score).toFixed(0)} points today!`,
+        time: "1 min ago",
+        icon: <TrendingUp className="w-4 h-4" />
+      });
+    }
+
+    if (todayActivity.length > 0) {
+      notifs.push({
+        id: 4,
+        type: "success",
+        title: "Great Job!",
+        message: "You logged exercise today. Keep up the momentum!",
+        time: "30 min ago",
+        icon: <CheckCircle2 className="w-4 h-4" />
+      });
+    }
+
+    setNotifications(notifs);
+  }, [healthProfile, liveHealthScore, todayMeals, todayActivity]);
+
+  const getScoreChange = () => {
+    if (!healthProfile) return 0;
+    return liveHealthScore - healthProfile.health_score;
+  };
+
+  const getScoreColor = (score) => {
+    if (score >= 80) return "text-green-600";
+    if (score >= 60) return "text-yellow-600";
+    return "text-orange-600";
+  };
+
+  const getNotificationColor = (type) => {
+    const colors = {
+      success: "bg-green-50 border-green-200 text-green-900",
+      warning: "bg-orange-50 border-orange-200 text-orange-900",
+      info: "bg-blue-50 border-blue-200 text-blue-900"
+    };
+    return colors[type] || colors.info;
+  };
+
+  if (!healthProfile) {
+    return (
+      <div className="p-8 max-w-4xl mx-auto">
+        <Card className="border-none shadow-lg">
+          <CardContent className="p-12 text-center">
+            <Zap className="w-16 h-16 text-slate-300 mx-auto mb-4" />
+            <p className="text-slate-500">Complete your health profile to access Live Dashboard</p>
+          </CardContent>
+        </Card>
+      </div>
+    );
+  }
+
+  return (
+    <div className="p-4 md:p-8 space-y-6">
+      {/* Header */}
+      <div className="flex flex-col md:flex-row justify-between items-start md:items-center gap-4">
+        <div>
+          <div className="flex items-center gap-3 mb-2">
+            <div className="relative">
+              <div className="w-14 h-14 bg-gradient-to-br from-green-400 via-cyan-500 to-blue-600 rounded-2xl flex items-center justify-center shadow-xl animate-pulse">
+                <Zap className="w-8 h-8 text-white" />
+              </div>
+              <div className="absolute -top-1 -right-1 w-4 h-4 bg-green-500 rounded-full animate-ping" />
+            </div>
+            <div>
+              <h1 className="text-3xl md:text-4xl font-bold text-slate-900">VitalPath Live</h1>
+              <p className="text-slate-500">Real-time health monitoring • Updated {format(lastUpdate, "h:mm a")}</p>
+            </div>
+          </div>
+        </div>
+        <div className="flex items-center gap-3">
+          <Badge className="bg-gradient-to-r from-amber-400 to-amber-600 text-white border-0 text-lg py-2 px-4">
+            <Trophy className="w-5 h-5 mr-2" />
+            {vitalCoins} Coins
+          </Badge>
+          <div className="relative">
+            <Button variant="outline" className="border-2">
+              <Bell className="w-5 h-5" />
+            </Button>
+            {notifications.length > 0 && (
+              <div className="absolute -top-1 -right-1 w-5 h-5 bg-red-500 text-white text-xs rounded-full flex items-center justify-center font-bold">
+                {notifications.length}
+              </div>
+            )}
+          </div>
+        </div>
+      </div>
+
+      {/* Live Health Pulse */}
+      <Card className="border-none shadow-2xl overflow-hidden relative">
+        <div className="absolute inset-0 bg-gradient-to-br from-green-500/10 via-cyan-500/10 to-blue-500/10 animate-pulse" />
+        <CardContent className="p-8 relative">
+          <div className="grid grid-cols-1 lg:grid-cols-2 gap-8">
+            <div>
+              <div className="flex items-center gap-2 mb-4">
+                <div className="w-3 h-3 bg-green-500 rounded-full animate-pulse" />
+                <h2 className="text-lg font-semibold text-slate-700">LIVE HEALTH SCORE</h2>
+              </div>
+              
+              <div className="flex items-baseline gap-4 mb-6">
+                <span className={`text-7xl font-bold ${getScoreColor(liveHealthScore)}`}>
+                  {liveHealthScore}
+                </span>
+                <div className="flex flex-col">
+                  <span className="text-2xl text-slate-400">/100</span>
+                  {getScoreChange() !== 0 && (
+                    <div className={`flex items-center gap-1 ${getScoreChange() > 0 ? 'text-green-600' : 'text-red-600'}`}>
+                      {getScoreChange() > 0 ? <ArrowUp className="w-5 h-5" /> : <ArrowDown className="w-5 h-5" />}
+                      <span className="font-bold text-lg">{Math.abs(getScoreChange()).toFixed(0)}</span>
+                    </div>
+                  )}
+                </div>
+              </div>
+
+              <div className="space-y-3">
+                <div className="flex justify-between text-sm">
+                  <span className="text-slate-600">Today's Impact</span>
+                  <span className="font-semibold text-green-600">+{(liveHealthScore - healthProfile.health_score).toFixed(0)} points</span>
+                </div>
+                <Progress value={liveHealthScore} className="h-3" />
+                <p className="text-sm text-slate-600">
+                  {liveHealthScore >= 80 && "🌟 Excellent! You're crushing your health goals today!"}
+                  {liveHealthScore >= 60 && liveHealthScore < 80 && "💪 Good progress! Keep building momentum."}
+                  {liveHealthScore < 60 && "📈 You've got this! Small actions lead to big results."}
+                </p>
+              </div>
+            </div>
+
+            <div>
+              <h3 className="text-lg font-semibold text-slate-700 mb-4">24-Hour Health Pulse</h3>
+              <ResponsiveContainer width="100%" height={200}>
+                <LineChart data={scoreHistory}>
+                  <Line 
+                    type="monotone" 
+                    dataKey="score" 
+                    stroke="#06b6d4" 
+                    strokeWidth={3}
+                    dot={false}
+                  />
+                </LineChart>
+              </ResponsiveContainer>
+              <p className="text-xs text-slate-500 mt-2 text-center">
+                Your health score updates in real-time based on your activities
+              </p>
+            </div>
+          </div>
+        </CardContent>
+      </Card>
+
+      {/* Daily Missions */}
+      <Card className="border-none shadow-lg">
+        <CardHeader className="border-b border-slate-100">
+          <div className="flex items-center justify-between">
+            <CardTitle className="flex items-center gap-2">
+              <Target className="w-5 h-5 text-cyan-600" />
+              Today's Missions
+            </CardTitle>
+            <Badge variant="outline">
+              {dailyMissions.filter(m => m.completed).length}/{dailyMissions.length} Complete
+            </Badge>
+          </div>
+        </CardHeader>
+        <CardContent className="p-6">
+          <div className="space-y-4">
+            {dailyMissions.map((mission) => (
+              <div
+                key={mission.id}
+                className={`p-4 rounded-xl border-2 transition-all ${
+                  mission.completed
+                    ? "bg-green-50 border-green-300"
+                    : "bg-slate-50 border-slate-200 hover:border-cyan-300"
+ 
