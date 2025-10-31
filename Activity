@@ -1,0 +1,430 @@
+import React, { useState, useEffect } from "react";
+import { base44 } from "@/api/base44Client";
+import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
+import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import { Button } from "@/components/ui/button";
+import { Input } from "@/components/ui/input";
+import { Label } from "@/components/ui/label";
+import { Badge } from "@/components/ui/badge";
+import { Progress } from "@/components/ui/progress";
+import { 
+  Activity as ActivityIcon, 
+  Plus, 
+  Flame,
+  TrendingUp,
+  Timer,
+  Award,
+  Target
+} from "lucide-react";
+import { format, startOfWeek, endOfWeek } from "date-fns";
+
+export default function Activity() {
+  const [user, setUser] = useState(null);
+  const [showForm, setShowForm] = useState(false);
+  const [selectedDate, setSelectedDate] = useState(format(new Date(), "yyyy-MM-dd"));
+  const queryClient = useQueryClient();
+
+  const [activityData, setActivityData] = useState({
+    activity_type: "walking",
+    duration_minutes: "",
+    intensity: "moderate",
+    distance_miles: "",
+    steps: "",
+    activity_date: selectedDate,
+    activity_time: format(new Date(), "HH:mm"),
+    notes: ""
+  });
+
+  useEffect(() => {
+    const loadUser = async () => {
+      const userData = await base44.auth.me();
+      setUser(userData);
+    };
+    loadUser();
+  }, []);
+
+  const { data: todayActivities = [] } = useQuery({
+    queryKey: ["activities", user?.email, selectedDate],
+    queryFn: async () => {
+      return await base44.entities.ActivityLog.filter({ 
+        user_email: user?.email, 
+        activity_date: selectedDate 
+      }, "-activity_time");
+    },
+    enabled: !!user?.email,
+  });
+
+  const { data: weekActivities = [] } = useQuery({
+    queryKey: ["weekActivities", user?.email],
+    queryFn: async () => {
+      const start = format(startOfWeek(new Date()), "yyyy-MM-dd");
+      const end = format(endOfWeek(new Date()), "yyyy-MM-dd");
+      const allActivities = await base44.entities.ActivityLog.filter({ user_email: user?.email });
+      return allActivities.filter(a => a.activity_date >= start && a.activity_date <= end);
+    },
+    enabled: !!user?.email,
+  });
+
+  const { data: activeChallenges = [] } = useQuery({
+    queryKey: ["activeChallenges"],
+    queryFn: async () => {
+      return await base44.entities.Challenge.filter({ is_active: true }, "-created_date", 5);
+    },
+  });
+
+  const createActivityMutation = useMutation({
+    mutationFn: async (activity) => {
+      const caloriesPerMinute = {
+        walking: 4,
+        running: 10,
+        cycling: 8,
+        swimming: 9,
+        yoga: 3,
+        strength_training: 5,
+        sports: 7,
+        dancing: 6,
+        hiking: 6,
+        other: 5
+      };
+
+      const calories = (activity.duration_minutes || 0) * (caloriesPerMinute[activity.activity_type] || 5);
+      
+      return await base44.entities.ActivityLog.create({
+        ...activity,
+        user_email: user.email,
+        calories_burned: calories,
+        duration_minutes: parseFloat(activity.duration_minutes),
+        distance_miles: activity.distance_miles ? parseFloat(activity.distance_miles) : undefined,
+        steps: activity.steps ? parseInt(activity.steps) : undefined
+      });
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["activities"] });
+      queryClient.invalidateQueries({ queryKey: ["weekActivities"] });
+      setShowForm(false);
+      setActivityData({
+        activity_type: "walking",
+        duration_minutes: "",
+        intensity: "moderate",
+        distance_miles: "",
+        steps: "",
+        activity_date: selectedDate,
+        activity_time: format(new Date(), "HH:mm"),
+        notes: ""
+      });
+    },
+  });
+
+  const todayMinutes = todayActivities.reduce((sum, a) => sum + (a.duration_minutes || 0), 0);
+  const todayCalories = todayActivities.reduce((sum, a) => sum + (a.calories_burned || 0), 0);
+  const todaySteps = todayActivities.reduce((sum, a) => sum + (a.steps || 0), 0);
+  
+  const weekMinutes = weekActivities.reduce((sum, a) => sum + (a.duration_minutes || 0), 0);
+  const weekCalories = weekActivities.reduce((sum, a) => sum + (a.calories_burned || 0), 0);
+  
+  const dailyStepsGoal = 10000;
+  const dailyMinutesGoal = 30;
+
+  const getActivityEmoji = (type) => {
+    const emojis = {
+      walking: "🚶",
+      running: "🏃",
+      cycling: "🚴",
+      swimming: "🏊",
+      yoga: "🧘",
+      strength_training: "💪",
+      sports: "⚽",
+      dancing: "💃",
+      hiking: "🥾",
+      other: "🏃"
+    };
+    return emojis[type] || "🏃";
+  };
+
+  const getIntensityColor = (intensity) => {
+    const colors = {
+      low: "bg-blue-100 text-blue-800 border-blue-200",
+      moderate: "bg-yellow-100 text-yellow-800 border-yellow-200",
+      high: "bg-orange-100 text-orange-800 border-orange-200",
+      very_high: "bg-red-100 text-red-800 border-red-200"
+    };
+    return colors[intensity] || colors.moderate;
+  };
+
+  return (
+    <div className="p-4 md:p-8 space-y-6">
+      <div className="flex flex-col md:flex-row justify-between items-start md:items-center gap-4">
+        <div>
+          <h1 className="text-3xl md:text-4xl font-bold text-slate-900">Activity Tracker</h1>
+          <p className="text-slate-500 mt-1">Move more, feel better</p>
+        </div>
+        <div className="flex gap-3">
+          <Input
+            type="date"
+            value={selectedDate}
+            onChange={(e) => setSelectedDate(e.target.value)}
+            className="w-auto"
+          />
+          <Button
+            onClick={() => setShowForm(!showForm)}
+            className="bg-gradient-to-r from-blue-500 to-blue-600 hover:from-blue-600 hover:to-blue-700"
+          >
+            <Plus className="w-5 h-5 mr-2" />
+            Log Activity
+          </Button>
+        </div>
+      </div>
+
+      {/* Daily Stats */}
+      <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
+        <Card className="border-none shadow-lg bg-gradient-to-br from-blue-50 to-blue-100">
+          <CardContent className="p-6">
+            <div className="flex items-center justify-between mb-3">
+              <Timer className="w-8 h-8 text-blue-600" />
+              <span className="text-sm font-semibold text-blue-900">TODAY</span>
+            </div>
+            <div className="space-y-2">
+              <div className="flex items-baseline gap-2">
+                <span className="text-3xl font-bold text-slate-900">{todayMinutes}</span>
+                <span className="text-sm text-slate-600">/ {dailyMinutesGoal} min</span>
+              </div>
+              <Progress value={(todayMinutes / dailyMinutesGoal) * 100} className="h-2" />
+            </div>
+          </CardContent>
+        </Card>
+
+        <Card className="border-none shadow-lg bg-gradient-to-br from-orange-50 to-orange-100">
+          <CardContent className="p-6">
+            <div className="flex items-center justify-between mb-3">
+              <Flame className="w-8 h-8 text-orange-600" />
+              <span className="text-sm font-semibold text-orange-900">BURNED</span>
+            </div>
+            <div className="text-3xl font-bold text-slate-900">{todayCalories}</div>
+            <p className="text-sm text-slate-600 mt-1">calories</p>
+          </CardContent>
+        </Card>
+
+        <Card className="border-none shadow-lg bg-gradient-to-br from-green-50 to-green-100">
+          <CardContent className="p-6">
+            <div className="flex items-center justify-between mb-3">
+              <ActivityIcon className="w-8 h-8 text-green-600" />
+              <span className="text-sm font-semibold text-green-900">STEPS</span>
+            </div>
+            <div className="space-y-2">
+              <div className="flex items-baseline gap-2">
+                <span className="text-3xl font-bold text-slate-900">{todaySteps.toLocaleString()}</span>
+              </div>
+              <Progress value={(todaySteps / dailyStepsGoal) * 100} className="h-2" />
+              <p className="text-xs text-slate-600">
+                {dailyStepsGoal - todaySteps > 0 
+                  ? `${(dailyStepsGoal - todaySteps).toLocaleString()} to goal` 
+                  : "Goal reached!"}
+              </p>
+            </div>
+          </CardContent>
+        </Card>
+
+        <Card className="border-none shadow-lg bg-gradient-to-br from-purple-50 to-purple-100">
+          <CardContent className="p-6">
+            <div className="flex items-center justify-between mb-3">
+              <TrendingUp className="w-8 h-8 text-purple-600" />
+              <span className="text-sm font-semibold text-purple-900">THIS WEEK</span>
+            </div>
+            <div className="text-3xl font-bold text-slate-900">{weekMinutes}</div>
+            <p className="text-sm text-slate-600 mt-1">total minutes</p>
+          </CardContent>
+        </Card>
+      </div>
+
+      {/* Log Activity Form */}
+      {showForm && (
+        <Card className="border-none shadow-xl">
+          <CardHeader className="border-b border-slate-100">
+            <CardTitle className="flex items-center gap-2">
+              <ActivityIcon className="w-5 h-5 text-blue-600" />
+              Log Activity
+            </CardTitle>
+          </CardHeader>
+          <CardContent className="p-6 space-y-4">
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+              <div className="space-y-2">
+                <Label htmlFor="activity_type">Activity Type</Label>
+                <select
+                  id="activity_type"
+                  value={activityData.activity_type}
+                  onChange={(e) => setActivityData({ ...activityData, activity_type: e.target.value })}
+                  className="w-full px-3 py-2 border border-slate-200 rounded-md"
+                >
+                  <option value="walking">Walking</option>
+                  <option value="running">Running</option>
+                  <option value="cycling">Cycling</option>
+                  <option value="swimming">Swimming</option>
+                  <option value="yoga">Yoga</option>
+                  <option value="strength_training">Strength Training</option>
+                  <option value="sports">Sports</option>
+                  <option value="dancing">Dancing</option>
+                  <option value="hiking">Hiking</option>
+                  <option value="other">Other</option>
+                </select>
+              </div>
+
+              <div className="space-y-2">
+                <Label htmlFor="duration">Duration (minutes)</Label>
+                <Input
+                  id="duration"
+                  type="number"
+                  placeholder="30"
+                  value={activityData.duration_minutes}
+                  onChange={(e) => setActivityData({ ...activityData, duration_minutes: e.target.value })}
+                />
+              </div>
+
+              <div className="space-y-2">
+                <Label htmlFor="intensity">Intensity</Label>
+                <select
+                  id="intensity"
+                  value={activityData.intensity}
+                  onChange={(e) => setActivityData({ ...activityData, intensity: e.target.value })}
+                  className="w-full px-3 py-2 border border-slate-200 rounded-md"
+                >
+                  <option value="low">Low</option>
+                  <option value="moderate">Moderate</option>
+                  <option value="high">High</option>
+                  <option value="very_high">Very High</option>
+                </select>
+              </div>
+
+              <div className="space-y-2">
+                <Label htmlFor="time">Time</Label>
+                <Input
+                  id="time"
+                  type="time"
+                  value={activityData.activity_time}
+                  onChange={(e) => setActivityData({ ...activityData, activity_time: e.target.value })}
+                />
+              </div>
+
+              <div className="space-y-2">
+                <Label htmlFor="distance">Distance (miles)</Label>
+                <Input
+                  id="distance"
+                  type="number"
+                  step="0.1"
+                  placeholder="Optional"
+                  value={activityData.distance_miles}
+                  onChange={(e) => setActivityData({ ...activityData, distance_miles: e.target.value })}
+                />
+              </div>
+
+              <div className="space-y-2">
+                <Label htmlFor="steps">Steps</Label>
+                <Input
+                  id="steps"
+                  type="number"
+                  placeholder="Optional"
+                  value={activityData.steps}
+                  onChange={(e) => setActivityData({ ...activityData, steps: e.target.value })}
+                />
+              </div>
+            </div>
+
+            <div className="space-y-2">
+              <Label htmlFor="notes">Notes</Label>
+              <Input
+                id="notes"
+                placeholder="How did it feel?"
+                value={activityData.notes}
+                onChange={(e) => setActivityData({ ...activityData, notes: e.target.value })}
+              />
+            </div>
+
+            <div className="flex justify-end gap-3">
+              <Button variant="outline" onClick={() => setShowForm(false)}>
+                Cancel
+              </Button>
+              <Button
+                onClick={() => createActivityMutation.mutate(activityData)}
+                disabled={!activityData.duration_minutes}
+                className="bg-gradient-to-r from-blue-500 to-blue-600 hover:from-blue-600 hover:to-blue-700"
+              >
+                Log Activity
+              </Button>
+            </div>
+          </CardContent>
+        </Card>
+      )}
+
+      {/* Activity History */}
+      <Card className="border-none shadow-lg">
+        <CardHeader className="border-b border-slate-100">
+          <CardTitle>Today's Activities</CardTitle>
+        </CardHeader>
+        <CardContent className="p-6">
+          {todayActivities.length === 0 ? (
+            <div className="text-center py-12">
+              <ActivityIcon className="w-16 h-16 text-slate-300 mx-auto mb-4" />
+              <p className="text-slate-500">No activities logged yet today</p>
+              <Button
+                onClick={() => setShowForm(true)}
+                variant="outline"
+                className="mt-4"
+              >
+                Log Your First Activity
+              </Button>
+            </div>
+          ) : (
+            <div className="space-y-4">
+              {todayActivities.map((activity) => (
+                <div
+                  key={activity.id}
+                  className="border border-slate-200 rounded-xl p-4 hover:shadow-md transition-shadow"
+                >
+                  <div className="flex items-start justify-between">
+                    <div className="flex items-start gap-3 flex-1">
+                      <div className="text-4xl">{getActivityEmoji(activity.activity_type)}</div>
+                      <div className="flex-1">
+                        <div className="flex items-center gap-2 mb-2">
+                          <h3 className="font-semibold text-slate-900 capitalize">
+                            {activity.activity_type.replace(/_/g, " ")}
+                          </h3>
+                          <span className="text-sm text-slate-500">{activity.activity_time}</span>
+                          <Badge className={`${getIntensityColor(activity.intensity)} border ml-auto`}>
+                            {activity.intensity}
+                          </Badge>
+                        </div>
+                        
+                        <div className="flex flex-wrap gap-4 text-sm text-slate-600">
+                          <span>⏱️ {activity.duration_minutes} min</span>
+                          <span>🔥 {activity.calories_burned} cal</span>
+                          {activity.distance_miles > 0 && <span>📍 {activity.distance_miles} mi</span>}
+                          {activity.steps > 0 && <span>👟 {activity.steps.toLocaleString()} steps</span>}
+                        </div>
+
+                        {activity.notes && (
+                          <p className="mt-2 text-sm text-slate-600 italic">{activity.notes}</p>
+                        )}
+                      </div>
+                    </div>
+                  </div>
+                </div>
+              ))}
+            </div>
+          )}
+        </CardContent>
+      </Card>
+
+      {/* Active Challenges */}
+      {activeChallenges.length > 0 && (
+        <Card className="border-none shadow-lg">
+          <CardHeader className="border-b border-slate-100">
+            <CardTitle className="flex items-center gap-2">
+              <Award className="w-5 h-5 text-amber-600" />
+              Active Challenges
+            </CardTitle>
+          </CardHeader>
+          <CardContent className="p-6">
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+              {activeChallenges.map((challenge) => (
+                <div
+                  key={challenge.id}
+ 
